@@ -6,3 +6,4 @@ numpy>=1.26.0
 python-multipart>=0.0.6
 sse-starlette>=1.6.0
 black>=24.0.0
+pytest>=7.0.0
