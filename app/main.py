@@ -17,6 +17,4 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 @app.get("/")
 def index(request: Request):
     """Serve the main page with the places input form"""
-    return templates.TemplateResponse(
-        request=request, name="index.html", context={}
-    )
+    return templates.TemplateResponse(request=request, name="index.html", context={})
