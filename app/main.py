@@ -10,7 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.services.nominatim import geocode_place
 from app.services.osrm import get_distance_matrix
-from app.services.solver import run_nn_with_progress
+from app.services.solver import run_nn_with_progress, run_sa_with_progress
 
 app = FastAPI(title="Travel Route Optimizer")
 
@@ -106,12 +106,15 @@ class SolveRequest(BaseModel):
 @app.post("/api/solve/stream")
 async def api_solve_stream(payload: SolveRequest):
     """
-    Solve TSP via Nearest Neighbor and stream progress as Server-Sent Events.
+    Solve TSP via Nearest Neighbor then improve with Simulated Annealing,
+    streaming progress for both phases as Server-Sent Events.
 
     Body: {"coordinates": [[lon, lat], [lon, lat], ...]}
     Events: {"type": "matrix", "size": N}
-            {"type": "progress", "route": [...], "cost": float}
-            {"type": "done", "route": [...], "cost": float}
+            {"type": "progress", "route": [...], "cost": float}       — NN step
+            {"type": "nn_done", "route": [...], "cost": float}        — NN result
+            {"type": "sa_progress", "route": [...], "cost": float}    — SA improvement
+            {"type": "sa_done", "route": [...], "cost": float}        — final result
             {"type": "error", "message": "..."}
     """
     coords = [tuple(c) for c in payload.coordinates]
@@ -121,8 +124,23 @@ async def api_solve_stream(payload: SolveRequest):
             matrix = await get_distance_matrix(coords)
             yield json.dumps({"type": "matrix", "size": len(matrix)})
 
+            nn_route = None
+            nn_cost = None
             async for event in run_nn_with_progress(matrix, start_index=0):
-                yield json.dumps(event)
+                if event["type"] == "done":
+                    nn_route = event["route"]
+                    nn_cost = event["cost"]
+                    yield json.dumps({"type": "nn_done", "route": nn_route, "cost": nn_cost})
+                else:
+                    yield json.dumps(event)
+
+            if nn_route and len(nn_route) > 3:
+                async for event in run_sa_with_progress(
+                    matrix, initial_route=nn_route, max_iter=10_000
+                ):
+                    yield json.dumps(event)
+            else:
+                yield json.dumps({"type": "sa_done", "route": nn_route, "cost": nn_cost})
         except Exception as exc:
             yield json.dumps({"type": "error", "message": str(exc)})
 

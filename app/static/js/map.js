@@ -52,9 +52,10 @@ async function readSSEStream(response, onEvent) {
  * Queries each consecutive pair to get the real road-following path.
  *
  * @param {Array<{lat: number, lon: number}>} orderedCoords - Coordinates in route order
+ * @param {Function|null} onSegment - Optional callback(segmentLatLngs, segmentIndex) called after each segment is fetched
  * @returns {Promise<Array<[number, number]>>} - Array of [lat, lon] for the full polyline
  */
-async function fetchWalkingGeometry(orderedCoords) {
+async function fetchWalkingGeometry(orderedCoords, onSegment = null) {
   const allLatLngs = [];
 
   for (let i = 0; i < orderedCoords.length - 1; i++) {
@@ -69,8 +70,8 @@ async function fetchWalkingGeometry(orderedCoords) {
       const resp = await fetch(url);
       if (!resp.ok) {
         console.warn(`OSRM route request failed for segment ${i}: HTTP ${resp.status}`);
-        // Fallback: straight line for this segment
         allLatLngs.push([from.lat, from.lon]);
+        if (onSegment) await onSegment([...allLatLngs], i);
         continue;
       }
       const data = await resp.json();
@@ -80,13 +81,14 @@ async function fetchWalkingGeometry(orderedCoords) {
           allLatLngs.push([lat, lon]);
         }
       } else {
-        // Fallback: straight line
         allLatLngs.push([from.lat, from.lon]);
       }
     } catch (err) {
       console.warn(`OSRM route request error for segment ${i}:`, err);
       allLatLngs.push([from.lat, from.lon]);
     }
+
+    if (onSegment) await onSegment([...allLatLngs], i);
   }
 
   // Ensure the last point is included
@@ -189,6 +191,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let finalRoute = null;
     let finalCost = null;
+    let saImprovements = 0;
     const totalPlaces = geocodedCoords.length;
 
     await readSSEStream(resp, async (event) => {
@@ -197,16 +200,25 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (event.type === "progress") {
         const visited = event.route.length - 1;
         drawRoute(event.route, geocodedCoords, "#6c757d");
-        setStatus(`Solving: visited ${visited} of ${totalPlaces} place(s)...`);
-        // Yield to browser so Leaflet can repaint the polyline
+        setStatus(`Nearest Neighbor: visited ${visited} of ${totalPlaces} place(s)...`);
         await animationDelay(300);
-      } else if (event.type === "done") {
+      } else if (event.type === "nn_done") {
+        drawRoute(event.route, geocodedCoords, "#6c757d");
+        const minutes = (event.cost / 60).toFixed(1);
+        setStatus(`Nearest Neighbor done (${minutes} min). Improving with Simulated Annealing...`);
+        await animationDelay(400);
+      } else if (event.type === "sa_progress") {
+        saImprovements++;
+        drawRoute(event.route, geocodedCoords, "#fd7e14");
+        const minutes = (event.cost / 60).toFixed(1);
+        setStatus(`SA: improvement #${saImprovements} — ${minutes} min`);
+        await animationDelay(100);
+      } else if (event.type === "sa_done") {
         finalRoute = event.route;
         finalCost = event.cost;
-        // Draw straight-line version immediately while we fetch real geometry
         drawRoute(event.route, geocodedCoords, "#0d6efd");
         const minutes = (event.cost / 60).toFixed(1);
-        setStatus(`Route found! Total walking time: ${minutes} min. Loading walking path...`);
+        setStatus(`Route optimized! ${minutes} min (${saImprovements} SA improvements). Loading walking path...`);
       } else if (event.type === "error") {
         setStatus(`Solve error: ${event.message}`);
       }
@@ -217,13 +229,18 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // Fetch real walking geometry from OSRM for the final route
+    // Fetch real walking geometry from OSRM, animating segment by segment
     try {
       const orderedCoords = finalRoute
         .filter((i) => i < geocodedCoords.length)
         .map((i) => geocodedCoords[i]);
 
-      const walkingLatLngs = await fetchWalkingGeometry(orderedCoords);
+      const totalSegments = orderedCoords.length - 1;
+      const walkingLatLngs = await fetchWalkingGeometry(orderedCoords, async (partialPath, segIdx) => {
+        drawRawPolyline(partialPath, "#198754");
+        const minutes = (finalCost / 60).toFixed(1);
+        setStatus(`Loading walking path... segment ${segIdx + 1} of ${totalSegments} (${minutes} min)`);
+      });
       drawRawPolyline(walkingLatLngs, "#0d6efd");
       const minutes = (finalCost / 60).toFixed(1);
       setStatus(`Route found! Total walking time: ${minutes} min`);
