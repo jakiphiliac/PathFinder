@@ -10,7 +10,7 @@ import httpx
 OSRM_BASE_URL = "https://router.project-osrm.org"
 
 
-def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[list[float]]:
+async def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[list[float]]:
     """
     Fetch a travel time matrix from OSRM for the given coordinates.
 
@@ -34,8 +34,8 @@ def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[list[flo
     coord_str = ";".join(f"{lon},{lat}" for lon, lat in coordinates)
     url = f"{OSRM_BASE_URL}/table/v1/foot/{coord_str}?annotations=duration"
 
-    with httpx.Client(timeout=30.0) as client:
-        response = client.get(url)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url)
         response.raise_for_status()
         data = response.json()
 

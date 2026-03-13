@@ -3,6 +3,16 @@
 {% block content %}
 <form id="places-form" class="mb-3">
     <div class="mb-3">
+        <label for="destination-input" class="form-label">Destination city</label>
+        <input
+            id="destination-input"
+            class="form-control"
+            type="text"
+            placeholder="London, UK"
+        />
+        <div class="form-text">City (and optionally country) you are visiting.</div>
+    </div>
+    <div class="mb-3">
         <label for="places-input" class="form-label">Places to visit</label>
         <textarea
             id="places-input"
@@ -10,7 +20,7 @@
             rows="3"
             placeholder="Big Ben, Tower of London, British Museum"
         ></textarea>
-        <div class="form-text">Comma-separated. (Geocoding comes in Step 6.)</div>
+        <div class="form-text">Comma-separated place names within the destination city.</div>
     </div>
     <button id="solve-btn" type="submit" class="btn btn-primary">Solve</button>
 </form>
