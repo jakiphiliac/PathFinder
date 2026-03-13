@@ -169,19 +169,64 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
+   * Format seconds-from-midnight as "HH:MM".
+   */
+  function secsToTime(secs) {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+
+  /**
+   * Display time window info in the panel and allow user overrides.
+   */
+  function showTimeWindows(windows, geocodedCoords) {
+    const panel = document.getElementById("time-windows-panel");
+    const list = document.getElementById("time-windows-list");
+    if (!panel || !list) return;
+
+    list.innerHTML = "";
+    for (const tw of windows) {
+      const name = (geocodedCoords[tw.index] && geocodedCoords[tw.index].name) || `Place ${tw.index}`;
+      const earliest = secsToTime(tw.window[0]);
+      const latest = secsToTime(tw.window[1]);
+      const sourceLabel = tw.overpass_hours
+        ? `${tw.overpass_name}: ${tw.overpass_hours}`
+        : tw.source;
+
+      const row = document.createElement("div");
+      row.className = "row mb-1 align-items-center small";
+      row.innerHTML = `
+        <div class="col-4 text-truncate" title="${name}">${name}</div>
+        <div class="col-3">${earliest} - ${latest}</div>
+        <div class="col-5 text-muted text-truncate" title="${sourceLabel}">${sourceLabel}</div>
+      `;
+      list.appendChild(row);
+    }
+
+    panel.style.display = "block";
+  }
+
+  /**
    * After geocoding, call /api/solve/stream with the coordinates and
    * progressively draw the route on the map as SSE events arrive.
    */
   async function solveRoute(geocodedCoords) {
     // OSRM expects [lon, lat] order
     const coordinates = geocodedCoords.map((c) => [c.lon, c.lat]);
+    const names = geocodedCoords.map((c) => c.name || "");
+    const visitDateEl = document.getElementById("visit-date");
+    const visitDate = visitDateEl ? visitDateEl.value : "";
 
-    setStatus("Fetching walking times from OSRM...");
+    setStatus("Fetching opening hours...");
+
+    const body = { coordinates, names };
+    if (visitDate) body.visit_date = visitDate;
 
     const resp = await fetch("/api/solve/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ coordinates }),
+      body: JSON.stringify(body),
     });
 
     if (!resp.ok) {
@@ -195,7 +240,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const totalPlaces = geocodedCoords.length;
 
     await readSSEStream(resp, async (event) => {
-      if (event.type === "matrix") {
+      if (event.type === "status") {
+        setStatus(event.message);
+      } else if (event.type === "time_windows") {
+        showTimeWindows(event.windows, geocodedCoords);
+        setStatus("Opening hours loaded. Fetching walking times...");
+      } else if (event.type === "matrix") {
         setStatus(`Distance matrix ready (${event.size} places). Solving route...`);
       } else if (event.type === "progress") {
         const visited = event.route.length - 1;
