@@ -1,7 +1,7 @@
+from pathlib import Path
 import asyncio
 import datetime
 import json
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -10,14 +10,10 @@ from pydantic import BaseModel, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from app.services.nominatim import geocode_place
-from app.services.opening_hours_utils import (
-    DEFAULT_WINDOW,
-    parse_to_time_window,
-    parse_user_override,
-)
-from app.services.osrm import get_distance_matrix
-from app.services.overpass import get_opening_hours_batch
+from app.services.osrm import get_distance_matrix, get_route_geometry
 from app.services.solver import run_nn_with_progress, run_sa_with_progress
+from app.services.overpass import get_opening_hours_batch
+from app.services.opening_hours_utils import parse_to_time_window, parse_user_override, DEFAULT_WINDOW
 
 app = FastAPI(title="Travel Route Optimizer")
 
@@ -77,9 +73,7 @@ async def api_geocode(payload: GeocodeRequest) -> GeocodeResponse:
         try:
             geocoded = await geocode_place(raw, destination=payload.destination)
         except Exception:
-            # Record a per-item error instead of failing the whole batch.
             results.append(GeocodeResult(name=raw, error="Geocoding failed."))
-            # Still respect rate limiting before continuing to next item.
             if idx < len(payload.places) - 1:
                 await asyncio.sleep(1.0)
             continue
@@ -96,16 +90,11 @@ async def api_geocode(payload: GeocodeRequest) -> GeocodeResponse:
     return GeocodeResponse(results=results)
 
 
-class TimeWindowOverride(BaseModel):
-    earliest: str  # "HH:MM"
-    latest: str    # "HH:MM"
-
-
 class SolveRequest(BaseModel):
     coordinates: list[list[float]]
-    names: list[str] | None = None
-    time_windows_override: dict[str, TimeWindowOverride] | None = None  # index -> override
-    visit_date: str | None = None  # "YYYY-MM-DD", defaults to today
+    locations: list[dict] = []  # [{name, lat, lon}] sent to Overpass for opening hours
+    time_windows_override: dict[str, dict] = {}  # {str(index): {earliest: "HH:MM", latest: "HH:MM"}}
+    day_of_week: int = -1  # -1 = today, 0=Mon … 6=Sun
 
     @field_validator("coordinates")
     @classmethod
@@ -118,92 +107,84 @@ class SolveRequest(BaseModel):
         return v
 
 
+class RouteGeometryRequest(BaseModel):
+    coordinates: list[list[float]]  # [[lon, lat], ...] in visit order
+
+
+@app.post("/api/route-geometry")
+async def api_route_geometry(payload: RouteGeometryRequest):
+    """
+    Fetch the actual road-snapped walking path for an ordered list of coordinates.
+
+    Body: {"coordinates": [[lon, lat], ...]}
+    Returns: {"latlngs": [[lat, lon], ...]} or {"error": "..."}
+    """
+    try:
+        latlngs = await get_route_geometry(payload.coordinates)
+        return {"latlngs": latlngs}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 @app.post("/api/solve/stream")
 async def api_solve_stream(payload: SolveRequest):
     """
-    Solve TSP via Nearest Neighbor then improve with Simulated Annealing,
-    streaming progress for both phases as Server-Sent Events.
-    Optionally fetches opening hours from Overpass and applies time windows.
+    Solve TSP via Nearest Neighbor then Simulated Annealing, streaming progress as SSE.
 
-    Body: {"coordinates": [[lon, lat], ...], "names": [...],
-           "time_windows_override": {"0": {"earliest": "09:00", "latest": "17:00"}},
-           "visit_date": "2026-03-13"}
+    Body: {"coordinates": [[lon, lat], ...], "locations": [...], "time_windows_override": {...}}
+
+    Events:
+        {"type": "matrix",        "size": N}
+        {"type": "status",        "message": "..."}
+        {"type": "opening_hours", "windows": [[earliest, latest], ...]}
+        {"type": "progress",      "route": [...], "cost": float}   — NN step
+        {"type": "nn_done",       "route": [...], "cost": float}   — NN complete
+        {"type": "sa_progress",   "route": [...], "cost": float}   — SA improvement
+        {"type": "sa_done",       "route": [...], "cost": float}   — SA complete
+        {"type": "error",         "message": "..."}
     """
-    coords = [tuple(c) for c in payload.coordinates]
-    names = payload.names or [None] * len(coords)
-
-    # Parse visit date
-    target_date = None
-    if payload.visit_date:
-        try:
-            target_date = datetime.date.fromisoformat(payload.visit_date)
-        except ValueError:
-            pass
-
     async def event_generator():
         try:
-            # --- Fetch opening hours from Overpass ---
-            locations = [
-                {"lat": c[1], "lon": c[0], "name": names[i] if i < len(names) else None}
-                for i, c in enumerate(coords)
-            ]
-            yield json.dumps({"type": "status", "message": "Fetching opening hours..."})
-
-            overpass_results = await get_opening_hours_batch(locations)
-
-            # Build time_windows list
-            time_windows: list[tuple[float, float]] | None = None
-            tw_info: list[dict] = []  # For sending to frontend
-            has_any_window = False
-
-            for i in range(len(coords)):
-                override = None
-                if payload.time_windows_override and str(i) in payload.time_windows_override:
-                    ov = payload.time_windows_override[str(i)]
-                    try:
-                        override = parse_user_override(ov.earliest, ov.latest)
-                    except ValueError:
-                        pass
-
-                if override:
-                    window = override
-                    source = "user"
-                    has_any_window = True
-                elif overpass_results[i]:
-                    oh_str = overpass_results[i]["opening_hours"]
-                    parsed = parse_to_time_window(oh_str, target_date)
-                    if parsed:
-                        window = parsed
-                        source = "overpass"
-                        has_any_window = True
-                    else:
-                        window = DEFAULT_WINDOW
-                        source = "default (closed or unparseable)"
-                else:
-                    window = DEFAULT_WINDOW
-                    source = "default"
-
-                tw_info.append({
-                    "index": i,
-                    "window": [window[0], window[1]],
-                    "source": source,
-                    "overpass_name": overpass_results[i]["name"] if overpass_results[i] else None,
-                    "overpass_hours": overpass_results[i]["opening_hours"] if overpass_results[i] else None,
-                })
-
-            # Only pass time_windows to solver if we found any real constraints
-            if has_any_window:
-                time_windows = [
-                    (info["window"][0], info["window"][1]) for info in tw_info
-                ]
-
-            yield json.dumps({"type": "time_windows", "windows": tw_info})
-
-            # --- Distance matrix ---
-            matrix = await get_distance_matrix(coords)
+            # Phase 0: Distance matrix
+            matrix = await get_distance_matrix(payload.coordinates)
             yield json.dumps({"type": "matrix", "size": len(matrix)})
 
-            # --- NN phase ---
+            # Phase 0b: Opening hours from Overpass (if locations provided)
+            time_windows = None
+            if payload.locations:
+                yield json.dumps({"type": "status", "message": "Fetching opening hours from OSM..."})
+
+                target_date = datetime.date.today()
+                if payload.day_of_week >= 0:
+                    today = datetime.date.today()
+                    days_ahead = (payload.day_of_week - today.weekday()) % 7
+                    target_date = today + datetime.timedelta(days=days_ahead)
+
+                oh_results = await get_opening_hours_batch(payload.locations)
+
+                time_windows = []
+                for i, result in enumerate(oh_results):
+                    override = payload.time_windows_override.get(str(i))
+                    if override and override.get("earliest") and override.get("latest"):
+                        try:
+                            window = parse_user_override(override["earliest"], override["latest"])
+                        except ValueError:
+                            window = DEFAULT_WINDOW
+                    elif result and result.get("opening_hours"):
+                        window = (
+                            parse_to_time_window(result["opening_hours"], target_date)
+                            or DEFAULT_WINDOW
+                        )
+                    else:
+                        window = DEFAULT_WINDOW
+                    time_windows.append(window)
+
+                yield json.dumps({
+                    "type": "opening_hours",
+                    "windows": [list(w) for w in time_windows],
+                })
+
+            # Phase 1: Nearest Neighbor with progress streaming
             nn_route = None
             nn_cost = None
             async for event in run_nn_with_progress(
@@ -216,15 +197,18 @@ async def api_solve_stream(payload: SolveRequest):
                 else:
                     yield json.dumps(event)
 
-            # --- SA phase ---
+            # Phase 2: Simulated Annealing (needs ≥ 2 inner cities: route length > 3)
             if nn_route and len(nn_route) > 3:
                 async for event in run_sa_with_progress(
-                    matrix, initial_route=nn_route,
-                    time_windows=time_windows, max_iter=10_000,
+                    matrix,
+                    initial_route=nn_route,
+                    time_windows=time_windows,
+                    max_iter=10_000,
                 ):
                     yield json.dumps(event)
             else:
                 yield json.dumps({"type": "sa_done", "route": nn_route, "cost": nn_cost})
+
         except Exception as exc:
             yield json.dumps({"type": "error", "message": str(exc)})
 

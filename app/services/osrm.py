@@ -5,17 +5,19 @@ Uses the public demo at router.project-osrm.org with the foot profile.
 Coordinates must be in (lon, lat) order.
 """
 
+from typing import cast
+
 import httpx
 
 OSRM_BASE_URL = "https://router.project-osrm.org"
 
 
-async def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[list[float]]:
+async def get_distance_matrix(coordinates: list[list[float]]) -> list[list[float]]:
     """
     Fetch a travel time matrix from OSRM for the given coordinates.
 
     Args:
-        coordinates: List of (longitude, latitude) tuples. OSRM uses lon,lat order.
+        coordinates: Sequence of (longitude, latitude) pairs. OSRM uses lon,lat order.
 
     Returns:
         2D list where result[i][j] is travel time in seconds from coordinates[i] to coordinates[j].
@@ -43,7 +45,7 @@ async def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[li
         msg = data.get("message", "Unknown OSRM error")
         raise ValueError(f"OSRM error: {msg}")
 
-    durations = data.get("durations")
+    durations = cast(list[list[float | None]], data.get("durations"))
     if durations is None:
         raise ValueError("OSRM response missing 'durations' field")
 
@@ -62,3 +64,37 @@ async def get_distance_matrix(coordinates: list[tuple[float, float]]) -> list[li
         result.append([(val if val is not None else penalty) for val in row])
 
     return result
+
+
+async def get_route_geometry(coordinates: list[list[float]]) -> list[list[float]]:
+    """
+    Fetch actual walking path geometry for an ordered sequence of coordinates.
+
+    Args:
+        coordinates: Sequence of (longitude, latitude) pairs in visit order.
+
+    Returns:
+        List of [lat, lon] pairs (Leaflet order) tracing the road-snapped walking path.
+    """
+    if len(coordinates) < 2:
+        return []
+
+    coord_str = ";".join(f"{lon},{lat}" for lon, lat in coordinates)
+    url = f"{OSRM_BASE_URL}/route/v1/foot/{coord_str}?overview=full&geometries=geojson"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+    if data.get("code") != "Ok":
+        msg = data.get("message", "Unknown OSRM error")
+        raise ValueError(f"OSRM error: {msg}")
+
+    routes = data.get("routes", [])
+    if not routes:
+        raise ValueError("OSRM returned no routes")
+
+    # GeoJSON coordinates are [lon, lat]; swap to [lat, lon] for Leaflet
+    geojson_coords = cast(list[list[float]], routes[0]["geometry"]["coordinates"])
+    return [[lat, lon] for lon, lat in geojson_coords]

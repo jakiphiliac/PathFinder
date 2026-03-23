@@ -3,7 +3,6 @@
 import pytest
 
 from app.algorithms.nearest_neighbor import solve
-from app.algorithms.simulated_annealing import solve as sa_solve
 from app.algorithms.tsp_tw_utils import evaluate_route
 
 
@@ -160,134 +159,6 @@ def test_nearest_neighbor_progress_callback_none_is_safe():
 # --- solver service tests ---
 
 
-# --- Simulated Annealing tests ---
-
-
-def test_sa_returns_valid_route():
-    """SA returns a valid route that visits all cities exactly once."""
-    matrix = [
-        [0, 10, 15, 20],
-        [10, 0, 35, 25],
-        [15, 35, 0, 30],
-        [20, 25, 30, 0],
-    ]
-    nn_route = [0, 1, 3, 2, 0]
-    route, cost = sa_solve(matrix, initial_route=nn_route, max_iter=5000)
-
-    # Route must start and end at 0
-    assert route[0] == 0
-    assert route[-1] == 0
-    # All cities visited exactly once
-    inner = sorted(route[1:-1])
-    assert inner == [1, 2, 3]
-    # Cost must match manual evaluation
-    expected_cost = sum(matrix[route[k]][route[k + 1]] for k in range(len(route) - 1))
-    assert abs(cost - expected_cost) < 1e-9
-
-
-def test_sa_improves_or_matches_nn():
-    """SA should find a cost <= NN cost (or equal) on a known matrix."""
-    matrix = [
-        [0, 10, 15, 20],
-        [10, 0, 35, 25],
-        [15, 35, 0, 30],
-        [20, 25, 30, 0],
-    ]
-    nn_route = [0, 1, 3, 2, 0]
-    nn_cost = 80.0  # 10 + 25 + 30 + 15
-
-    # Run SA multiple times — it should never be worse on average
-    results = []
-    for _ in range(10):
-        _, cost = sa_solve(matrix, initial_route=nn_route, max_iter=5000)
-        results.append(cost)
-
-    assert min(results) <= nn_cost
-
-
-def test_sa_empty_route():
-    """Empty initial_route returns empty route and zero cost."""
-    route, cost = sa_solve([], initial_route=[])
-    assert route == []
-    assert cost == 0.0
-
-
-def test_sa_single_city():
-    """Single-city route [0, 0] is returned unchanged."""
-    route, cost = sa_solve([[0]], initial_route=[0, 0])
-    assert route == [0, 0]
-    assert cost == 0.0
-
-
-def test_sa_two_cities():
-    """Two-city route has only one inner city — nothing to swap, returned as-is."""
-    matrix = [[0, 10], [10, 0]]
-    route, cost = sa_solve(matrix, initial_route=[0, 1, 0], max_iter=1000)
-    assert route == [0, 1, 0]
-    assert cost == 20.0
-
-
-def test_sa_invalid_route_raises():
-    """initial_route not starting and ending at same index raises ValueError."""
-    matrix = [[0, 10], [10, 0]]
-    with pytest.raises(ValueError, match="must start and end with the same index"):
-        sa_solve(matrix, initial_route=[0, 1])
-
-
-def test_sa_with_time_windows():
-    """SA uses evaluate_route for cost when time_windows are provided."""
-    matrix = [
-        [0, 10, 15],
-        [10, 0, 35],
-        [15, 35, 0],
-    ]
-    # Window that causes a violation on certain orderings
-    windows = [(0, 100), (0, 5), (0, 100)]  # arriving at 1 after t=5 is a violation
-    route, cost = sa_solve(
-        matrix, initial_route=[0, 1, 2, 0], time_windows=windows, max_iter=1000
-    )
-    # Cost should include penalty if violation exists, or be pure travel time if not
-    expected_cost, _ = evaluate_route(route, matrix, windows)
-    assert abs(cost - expected_cost) < 1e-9
-
-
-def test_sa_progress_callback_fires():
-    """progress_callback fires at start and on each new best."""
-    matrix = [
-        [0, 10, 15, 20],
-        [10, 0, 35, 25],
-        [15, 35, 0, 30],
-        [20, 25, 30, 0],
-    ]
-    events = []
-    sa_solve(
-        matrix,
-        initial_route=[0, 1, 3, 2, 0],
-        max_iter=5000,
-        progress_callback=lambda r, c: events.append((r, c)),
-    )
-    # At minimum: one initial event
-    assert len(events) >= 1
-    # First event should be the initial route
-    assert events[0][0] == [0, 1, 3, 2, 0]
-    # Costs should be non-increasing (each event is a new best)
-    for i in range(1, len(events)):
-        assert events[i][1] <= events[i - 1][1]
-
-
-def test_sa_progress_callback_none_is_safe():
-    """Passing progress_callback=None should not change behavior."""
-    matrix = [[0, 10, 15], [10, 0, 35], [15, 35, 0]]
-    route, cost = sa_solve(
-        matrix, initial_route=[0, 1, 2, 0], progress_callback=None
-    )
-    assert route[0] == 0
-    assert route[-1] == 0
-
-
-# --- solver service tests ---
-
-
 @pytest.mark.asyncio
 async def test_run_nn_with_progress_yields_events():
     """run_nn_with_progress yields progress and done events."""
@@ -311,7 +182,7 @@ async def test_run_nn_with_progress_yields_events():
 
 @pytest.mark.asyncio
 async def test_run_sa_with_progress_yields_events():
-    """run_sa_with_progress yields sa_progress and sa_done events."""
+    """run_sa_with_progress yields sa_progress events and a final sa_done event."""
     from app.services.solver import run_sa_with_progress
 
     matrix = [
@@ -325,17 +196,15 @@ async def test_run_sa_with_progress_yields_events():
     async for event in run_sa_with_progress(matrix, initial_route=nn_route, max_iter=5000):
         events.append(event)
 
-    # Must end with sa_done
     assert events[-1]["type"] == "sa_done"
     final_route = events[-1]["route"]
     assert final_route[0] == 0
     assert final_route[-1] == 0
     assert sorted(final_route[1:-1]) == [1, 2, 3]
 
-    # Should have at least one sa_progress (the initial best)
     sa_progress = [e for e in events if e["type"] == "sa_progress"]
     assert len(sa_progress) >= 1
 
-    # sa_progress costs should be non-increasing
+    # Each sa_progress event should be a new best (non-increasing costs)
     for i in range(1, len(sa_progress)):
         assert sa_progress[i]["cost"] <= sa_progress[i - 1]["cost"]

@@ -14,9 +14,6 @@ from app.algorithms import nearest_neighbor as nn
 from app.algorithms import simulated_annealing as sa
 
 
-_SENTINEL = object()
-
-
 async def run_nn_with_progress(
     matrix: list[list[float]],
     start_index: int = 0,
@@ -30,7 +27,7 @@ async def run_nn_with_progress(
         {"type": "progress", "route": [...], "cost": float}  — after each city
         {"type": "done", "route": [...], "cost": float}       — final result
     """
-    q: queue.Queue[tuple[str, list[int], float] | object] = queue.Queue()
+    q: queue.Queue[tuple[str, list[int], float] | None] = queue.Queue()
 
     def callback(route: list[int], cost: float) -> None:
         q.put(("progress", route, cost))
@@ -46,16 +43,17 @@ async def run_nn_with_progress(
             )
             return result
         finally:
-            q.put(_SENTINEL)
+            q.put(None)
 
     task = asyncio.get_event_loop().run_in_executor(None, run)
 
     while True:
         item = await asyncio.to_thread(q.get)
-        if item is _SENTINEL:
+        if item is None:
             break
         _, route, cost = item
         yield {"type": "progress", "route": route, "cost": cost}
+        await asyncio.sleep(0.15)  # pace events so animation is visible in the browser
 
     route, cost = await task
     yield {"type": "done", "route": route, "cost": cost}
@@ -77,7 +75,7 @@ async def run_sa_with_progress(
         {"type": "sa_progress", "route": [...], "cost": float}  — each new best
         {"type": "sa_done", "route": [...], "cost": float}       — final result
     """
-    q: queue.Queue[tuple[str, list[int], float] | object] = queue.Queue()
+    q: queue.Queue[tuple[str, list[int], float] | None] = queue.Queue()
 
     def callback(route: list[int], cost: float) -> None:
         q.put(("sa_progress", route, cost))
@@ -96,13 +94,13 @@ async def run_sa_with_progress(
             )
             return result
         finally:
-            q.put(_SENTINEL)
+            q.put(None)
 
     task = asyncio.get_event_loop().run_in_executor(None, run)
 
     while True:
         item = await asyncio.to_thread(q.get)
-        if item is _SENTINEL:
+        if item is None:
             break
         _, route, cost = item
         yield {"type": "sa_progress", "route": route, "cost": cost}
