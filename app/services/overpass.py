@@ -6,6 +6,8 @@ an `opening_hours` tag. Falls back across multiple Overpass instances
 for reliability.
 """
 
+import math
+
 import httpx
 
 # Multiple Overpass instances for reliability (public servers can be flaky).
@@ -168,7 +170,7 @@ def _find_nearby_elements(
         if el_lat is not None and el_lon is not None:
             # Rough distance check (1 degree ≈ 111km)
             dlat = abs(el_lat - lat) * 111_000
-            dlon = abs(el_lon - lon) * 111_000 * 0.65  # cos(51°) ≈ 0.63
+            dlon = abs(el_lon - lon) * 111_000 * math.cos(math.radians(lat))
             dist = (dlat**2 + dlon**2) ** 0.5
             if dist <= radius_m * 1.5:  # generous margin
                 candidates.append((dist, el))

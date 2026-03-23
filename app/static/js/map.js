@@ -203,6 +203,29 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (event.type === "status") {
         setStatus(event.message);
       } else if (event.type === "opening_hours") {
+        // Populate the OSM Hours column in the time windows table
+        if (placesTbody && event.windows) {
+          const rows = placesTbody.querySelectorAll("tr");
+          event.windows.forEach((win, idx) => {
+            if (idx < rows.length) {
+              const osmCell = rows[idx].querySelector(".tw-osm");
+              if (osmCell) {
+                const earliest = win[0];
+                const latest = win[1];
+                if (earliest === 0 && latest === 86400) {
+                  osmCell.textContent = "All day";
+                } else {
+                  const fmt = (secs) => {
+                    const h = String(Math.floor(secs / 3600)).padStart(2, "0");
+                    const m = String(Math.floor((secs % 3600) / 60)).padStart(2, "0");
+                    return `${h}:${m}`;
+                  };
+                  osmCell.textContent = `${fmt(earliest)}–${fmt(latest)}`;
+                }
+              }
+            }
+          });
+        }
         setStatus("Opening hours loaded. Running Nearest Neighbor...");
       } else if (event.type === "progress") {
         const visited = event.route.length - 1; // don't count start duplicate
@@ -313,13 +336,25 @@ document.addEventListener("DOMContentLoaded", () => {
           placesTbody.innerHTML = "";
           coords.forEach((c, idx) => {
             const tr = document.createElement("tr");
-            tr.innerHTML = `
-              <td class="text-muted">${idx + 1}</td>
-              <td>${c.name}</td>
-              <td><input type="text" class="form-control form-control-sm tw-open" placeholder="09:00" style="width:80px"></td>
-              <td><input type="text" class="form-control form-control-sm tw-close" placeholder="21:00" style="width:80px"></td>
-              <td class="text-muted small tw-osm">—</td>
-            `;
+
+            const tdIdx = document.createElement("td");
+            tdIdx.className = "text-muted";
+            tdIdx.textContent = String(idx + 1);
+
+            const tdName = document.createElement("td");
+            tdName.textContent = c.name;
+
+            const tdOpen = document.createElement("td");
+            tdOpen.innerHTML = '<input type="text" class="form-control form-control-sm tw-open" placeholder="09:00" style="width:80px">';
+
+            const tdClose = document.createElement("td");
+            tdClose.innerHTML = '<input type="text" class="form-control form-control-sm tw-close" placeholder="21:00" style="width:80px">';
+
+            const tdOsm = document.createElement("td");
+            tdOsm.className = "text-muted small tw-osm";
+            tdOsm.textContent = "—";
+
+            tr.append(tdIdx, tdName, tdOpen, tdClose, tdOsm);
             placesTbody.appendChild(tr);
           });
           placesTableContainer.style.display = "block";

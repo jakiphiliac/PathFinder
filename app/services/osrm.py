@@ -45,9 +45,10 @@ async def get_distance_matrix(coordinates: list[list[float]]) -> list[list[float
         msg = data.get("message", "Unknown OSRM error")
         raise ValueError(f"OSRM error: {msg}")
 
-    durations = cast(list[list[float | None]], data.get("durations"))
-    if durations is None:
+    raw_durations = data.get("durations")
+    if raw_durations is None:
         raise ValueError("OSRM response missing 'durations' field")
+    durations = cast(list[list[float | None]], raw_durations)
 
     # Replace null (unreachable pairs) with a large penalty so the solver can still produce a route.
     # 999999 seconds (~11.5 days) ensures unreachable pairs are avoided when possible.

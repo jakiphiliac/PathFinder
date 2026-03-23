@@ -45,7 +45,7 @@ async def run_nn_with_progress(
         finally:
             q.put(None)
 
-    task = asyncio.get_event_loop().run_in_executor(None, run)
+    task = asyncio.get_running_loop().run_in_executor(None, run)
 
     while True:
         item = await asyncio.to_thread(q.get)
@@ -96,7 +96,7 @@ async def run_sa_with_progress(
         finally:
             q.put(None)
 
-    task = asyncio.get_event_loop().run_in_executor(None, run)
+    task = asyncio.get_running_loop().run_in_executor(None, run)
 
     while True:
         item = await asyncio.to_thread(q.get)

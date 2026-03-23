@@ -12,9 +12,9 @@ from typing import Any
 import httpx
 
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "TravelRouteOptimizerThesis/1.0 (your-email-or-url)"
+USER_AGENT = "PathFinder-TravelRouteOptimizer/1.0 (https://github.com/akissa0606/PathFinder)"
 
-    
+
 async def geocode_place(
     place: str,
     destination: str | None = None,

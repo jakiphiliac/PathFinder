@@ -1,7 +1,7 @@
-from pathlib import Path
 import asyncio
 import datetime
 import json
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -9,12 +9,16 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, field_validator
 from sse_starlette.sse import EventSourceResponse
 
-from app.services.nominatim import geocode_place
-from app.services.osrm import get_distance_matrix, get_route_geometry
-from app.services.solver import run_nn_with_progress, run_sa_with_progress
-from app.services.overpass import get_opening_hours_batch
-from app.services.opening_hours_utils import parse_to_time_window, parse_user_override, DEFAULT_WINDOW
 from app.algorithms.tsp_tw_utils import evaluate_route
+from app.services.nominatim import geocode_place
+from app.services.opening_hours_utils import (
+    DEFAULT_WINDOW,
+    parse_to_time_window,
+    parse_user_override,
+)
+from app.services.osrm import get_distance_matrix, get_route_geometry
+from app.services.overpass import get_opening_hours_batch
+from app.services.solver import run_nn_with_progress, run_sa_with_progress
 
 app = FastAPI(title="Travel Route Optimizer")
 
@@ -91,10 +95,21 @@ async def api_geocode(payload: GeocodeRequest) -> GeocodeResponse:
     return GeocodeResponse(results=results)
 
 
+class LocationInput(BaseModel):
+    name: str
+    lat: float
+    lon: float
+
+
+class TimeWindowOverride(BaseModel):
+    earliest: str  # "HH:MM"
+    latest: str  # "HH:MM"
+
+
 class SolveRequest(BaseModel):
     coordinates: list[list[float]]
-    locations: list[dict] = []  # [{name, lat, lon}] sent to Overpass for opening hours
-    time_windows_override: dict[str, dict] = {}  # {str(index): {earliest: "HH:MM", latest: "HH:MM"}}
+    locations: list[LocationInput] = []
+    time_windows_override: dict[str, TimeWindowOverride] = {}
     day_of_week: int = -1  # -1 = today, 0=Mon … 6=Sun
 
     @field_validator("coordinates")
@@ -154,22 +169,29 @@ async def api_solve_stream(payload: SolveRequest):
             # Phase 0b: Opening hours from Overpass (if locations provided)
             time_windows = None
             if payload.locations:
+                if len(payload.locations) != len(payload.coordinates):
+                    raise ValueError(
+                        f"locations length ({len(payload.locations)}) must match "
+                        f"coordinates length ({len(payload.coordinates)})"
+                    )
+
                 yield json.dumps({"type": "status", "message": "Fetching opening hours from OSM..."})
 
-                target_date = datetime.date.today()
+                today = datetime.date.today()
+                target_date = today
                 if payload.day_of_week >= 0:
-                    today = datetime.date.today()
                     days_ahead = (payload.day_of_week - today.weekday()) % 7
                     target_date = today + datetime.timedelta(days=days_ahead)
 
-                oh_results = await get_opening_hours_batch(payload.locations)
+                locations_dicts = [loc.model_dump() for loc in payload.locations]
+                oh_results = await get_opening_hours_batch(locations_dicts)
 
                 time_windows = []
                 for i, result in enumerate(oh_results):
                     override = payload.time_windows_override.get(str(i))
-                    if override and override.get("earliest") and override.get("latest"):
+                    if override is not None:
                         try:
-                            window = parse_user_override(override["earliest"], override["latest"])
+                            window = parse_user_override(override.earliest, override.latest)
                         except ValueError:
                             window = DEFAULT_WINDOW
                     elif result and result.get("opening_hours"):
