@@ -5,6 +5,22 @@ function setStatus(message) {
 }
 
 
+function showWarning(message) {
+  const container = document.getElementById("warning-container");
+  if (!container) return;
+  container.innerHTML = `<div class="alert alert-warning alert-dismissible fade show" role="alert">
+    <strong>Warning:</strong> ${message}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>`;
+}
+
+
+function clearWarning() {
+  const container = document.getElementById("warning-container");
+  if (container) container.innerHTML = "";
+}
+
+
 function parsePlaces(raw) {
   return raw
     .split(",")
@@ -162,6 +178,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function solveRoute(coords, locations, timeWindowsOverride) {
     const coordinates = coords.map((c) => [c.lon, c.lat]);
 
+    clearWarning();
     setStatus("Fetching walking times from OSRM...");
 
     const resp = await fetch("/api/solve/stream", {
@@ -204,6 +221,10 @@ document.addEventListener("DOMContentLoaded", () => {
         finalRoute = event.route;
         finalCost = event.cost;
         drawRoute(event.route, coords, "#0d6efd"); // Blue straight-line placeholder
+      } else if (event.type === "feasibility") {
+        if (!event.feasible && event.warning) {
+          showWarning(event.warning);
+        }
       } else if (event.type === "error") {
         setStatus(`Solve error: ${event.message}`);
       }

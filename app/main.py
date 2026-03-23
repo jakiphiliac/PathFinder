@@ -14,6 +14,7 @@ from app.services.osrm import get_distance_matrix, get_route_geometry
 from app.services.solver import run_nn_with_progress, run_sa_with_progress
 from app.services.overpass import get_opening_hours_batch
 from app.services.opening_hours_utils import parse_to_time_window, parse_user_override, DEFAULT_WINDOW
+from app.algorithms.tsp_tw_utils import evaluate_route
 
 app = FastAPI(title="Travel Route Optimizer")
 
@@ -141,6 +142,7 @@ async def api_solve_stream(payload: SolveRequest):
         {"type": "nn_done",       "route": [...], "cost": float}   — NN complete
         {"type": "sa_progress",   "route": [...], "cost": float}   — SA improvement
         {"type": "sa_done",       "route": [...], "cost": float}   — SA complete
+        {"type": "feasibility",   "feasible": bool, "violations": int, "warning": str|null}
         {"type": "error",         "message": "..."}
     """
     async def event_generator():
@@ -198,6 +200,7 @@ async def api_solve_stream(payload: SolveRequest):
                     yield json.dumps(event)
 
             # Phase 2: Simulated Annealing (needs ≥ 2 inner cities: route length > 3)
+            final_route = nn_route
             if nn_route and len(nn_route) > 3:
                 async for event in run_sa_with_progress(
                     matrix,
@@ -205,9 +208,29 @@ async def api_solve_stream(payload: SolveRequest):
                     time_windows=time_windows,
                     max_iter=10_000,
                 ):
+                    if event["type"] == "sa_done":
+                        final_route = event["route"]
                     yield json.dumps(event)
             else:
                 yield json.dumps({"type": "sa_done", "route": nn_route, "cost": nn_cost})
+
+            # Phase 3: Feasibility check
+            if final_route and time_windows:
+                _, violations = evaluate_route(
+                    final_route, matrix, time_windows
+                )
+                feasible = violations == 0
+                warning = (
+                    None if feasible
+                    else f"Could not find a route satisfying all time windows. "
+                         f"{violations} violation(s). Showing best effort."
+                )
+                yield json.dumps({
+                    "type": "feasibility",
+                    "feasible": feasible,
+                    "violations": violations,
+                    "warning": warning,
+                })
 
         except Exception as exc:
             yield json.dumps({"type": "error", "message": str(exc)})

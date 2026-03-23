@@ -208,3 +208,25 @@ async def test_run_sa_with_progress_yields_events():
     # Each sa_progress event should be a new best (non-increasing costs)
     for i in range(1, len(sa_progress)):
         assert sa_progress[i]["cost"] <= sa_progress[i - 1]["cost"]
+
+
+# --- feasibility check tests ---
+
+
+def test_evaluate_route_feasible_with_loose_windows():
+    """Loose time windows produce 0 violations (feasible)."""
+    matrix = [[0, 10, 15], [10, 0, 35], [15, 35, 0]]
+    windows = [(0, 86400), (0, 86400), (0, 86400)]
+    cost, violations = evaluate_route([0, 1, 2, 0], matrix, windows)
+    assert violations == 0
+
+
+def test_evaluate_route_infeasible_with_tight_windows():
+    """Conflicting time windows produce violations > 0 (infeasible)."""
+    # 0->1: 100s, arrive 100. Window for 1: (0, 50) -> violation (100 > 50).
+    # 1->2: 100s, arrive 200. Window for 2: (0, 50) -> violation (200 > 50).
+    matrix = [[0, 100, 200], [100, 0, 100], [200, 100, 0]]
+    windows = [(0, 86400), (0, 50), (0, 50)]
+    cost, violations = evaluate_route([0, 1, 2, 0], matrix, windows)
+    assert violations == 2
+    assert cost == (100 + 100 + 200) + 10_000 * 2
