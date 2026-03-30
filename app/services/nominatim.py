@@ -12,7 +12,9 @@ from typing import Any
 import httpx
 
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "PathFinder-TravelRouteOptimizer/1.0 (https://github.com/akissa0606/PathFinder)"
+USER_AGENT = (
+    "PathFinder-TravelRouteOptimizer/1.0 (https://github.com/akissa0606/PathFinder)"
+)
 
 
 async def geocode_place(
@@ -34,7 +36,11 @@ async def geocode_place(
         return None
 
     # Bias results to the destination by appending it to the query.
-    query = place if not destination or not destination.strip() else f"{place}, {destination}"
+    query = (
+        place
+        if not destination or not destination.strip()
+        else f"{place}, {destination}"
+    )
 
     async with httpx.AsyncClient(
         timeout=20.0,
@@ -62,4 +68,3 @@ async def geocode_place(
         "lon": lon,
         "display_name": str(first.get("display_name", place)),
     }
-

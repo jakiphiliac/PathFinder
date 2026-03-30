@@ -21,6 +21,7 @@ TEST_DB = "/tmp/pathfinder_test.db"
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest_asyncio.fixture
 async def db():
     """Fresh in-memory-ish DB for each test."""
@@ -29,9 +30,11 @@ async def db():
 
     # Monkeypatch settings before importing db
     import app.config as cfg
+
     cfg.settings.database_path = TEST_DB
 
     from app.db import init_db
+
     await init_db()
 
     conn = await aiosqlite.connect(TEST_DB)
@@ -46,6 +49,7 @@ async def db():
 # ---------------------------------------------------------------------------
 # DB tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_db_connects(db):
@@ -87,8 +91,18 @@ async def test_trips_schema(db):
     cursor = await db.execute("PRAGMA table_info(trips)")
     columns = {row["name"] async for row in cursor}
     expected = {
-        "id", "city", "start_lat", "start_lon", "end_lat", "end_lon",
-        "start_time", "end_time", "date", "transport_mode", "created_at", "updated_at",
+        "id",
+        "city",
+        "start_lat",
+        "start_lon",
+        "end_lat",
+        "end_lon",
+        "start_time",
+        "end_time",
+        "date",
+        "transport_mode",
+        "created_at",
+        "updated_at",
     }
     assert expected <= columns
 
@@ -98,9 +112,20 @@ async def test_places_schema(db):
     cursor = await db.execute("PRAGMA table_info(places)")
     columns = {row["name"] async for row in cursor}
     expected = {
-        "id", "trip_id", "name", "lat", "lon", "category", "priority",
-        "estimated_duration_min", "opening_hours", "opening_hours_source",
-        "status", "arrived_at", "departed_at", "created_at",
+        "id",
+        "trip_id",
+        "name",
+        "lat",
+        "lon",
+        "category",
+        "priority",
+        "estimated_duration_min",
+        "opening_hours",
+        "opening_hours_source",
+        "status",
+        "arrived_at",
+        "departed_at",
+        "created_at",
     }
     assert expected <= columns
 
@@ -117,12 +142,14 @@ async def test_distance_cache_schema(db):
 async def test_init_db_is_idempotent(db):
     """Running init_db twice should not raise."""
     from app.db import init_db
+
     await init_db()  # second call — should succeed silently
 
 
 # ---------------------------------------------------------------------------
 # OSRM connectivity test (skipped if OSRM is not running)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_osrm_foot_responds():
