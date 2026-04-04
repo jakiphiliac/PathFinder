@@ -97,7 +97,6 @@ const searchQuery = ref("");
 const searchResults = ref([]);
 const searching = ref(false);
 const loadError = ref("");
-const actionError = ref("");
 const feasibility = ref(new Map());
 const userLat = ref(null);
 const userLon = ref(null);
@@ -110,6 +109,9 @@ const nextLoading = ref(false);
 const modeChanging = ref(false);
 const nextSkipIndex = ref(0); // which recommendation is "primary"
 const alerts = ref([]); // urgency alert banners
+const toasts = ref([]); // toast notifications
+const isOffline = ref(!navigator.onLine);
+const feasLoading = ref(true); // loading skeleton state
 
 let map = null;
 let eventSource = null;
@@ -158,6 +160,29 @@ const skippedPlaces = computed(() =>
   places.value.filter((p) => p.status === "skipped"),
 );
 
+const tripEnded = computed(() => {
+  if (!trip.value) return false;
+  const now = new Date();
+  const [eh, em] = (trip.value.end_time || "18:00").split(":").map(Number);
+  const end = new Date(now);
+  end.setHours(eh, em, 0, 0);
+  return now >= end;
+});
+
+const allPlacesDone = computed(() => {
+  if (!trip.value || places.value.length === 0) return false;
+  return places.value.every(
+    (p) => p.status === "done" || p.status === "skipped",
+  );
+});
+
+const tripSummary = computed(() => {
+  const total = places.value.length;
+  const visited = places.value.filter((p) => p.status === "done").length;
+  const skipped = places.value.filter((p) => p.status === "skipped").length;
+  return { total, visited, skipped };
+});
+
 const timeUsedPercent = computed(() => {
   if (!trip.value) return 0;
   const [sh, sm] = (trip.value.start_time || "09:00").split(":").map(Number);
@@ -168,6 +193,13 @@ const timeUsedPercent = computed(() => {
   const elapsed = now.getHours() * 60 + now.getMinutes() - (sh * 60 + sm);
   return Math.min(100, Math.max(0, (elapsed / totalMin) * 100));
 });
+
+watch(
+  () => trip.value?.city,
+  (city) => {
+    document.title = city ? `PathFinder — ${city}` : "PathFinder";
+  },
+);
 
 function getMarkerIcon(place) {
   const f = feasibility.value.get(place.id);
@@ -206,6 +238,7 @@ async function loadTrip() {
 
 async function loadFeasibility() {
   if (!trip.value) return;
+  feasLoading.value = true;
   const lat = userLat.value ?? trip.value.start_lat;
   const lon = userLon.value ?? trip.value.start_lon;
   try {
@@ -219,7 +252,10 @@ async function loadFeasibility() {
     feasibility.value = m;
     updateMapMarkers();
   } catch (e) {
-    // feasibility is optional, don't block UI
+    if (isOffline.value) return; // don't toast when offline
+    showToast("Could not refresh feasibility data");
+  } finally {
+    feasLoading.value = false;
   }
 }
 
@@ -321,40 +357,37 @@ async function handleAddPlace(result) {
     await loadTrip();
     await loadFeasibility();
   } catch (e) {
-    actionError.value = `Failed to add place: ${e.message}`;
+    showToast(`Failed to add place: ${e.message}`);
   }
 }
 
 async function handleDeletePlace(placeId) {
   try {
-    actionError.value = "";
     await deletePlace(tripId, placeId);
     await loadTrip();
     await loadFeasibility();
   } catch (e) {
-    actionError.value = `Failed to delete place: ${e.message}`;
+    showToast(`Failed to delete place: ${e.message}`);
   }
 }
 
 async function handlePriorityChange(place, newPriority) {
   try {
-    actionError.value = "";
     await updatePlace(tripId, place.id, { priority: newPriority });
     place.priority = newPriority;
   } catch (e) {
-    actionError.value = `Failed to update priority: ${e.message}`;
+    showToast(`Failed to update priority: ${e.message}`);
   }
 }
 
 async function handleDurationChange(place, newDuration) {
   try {
-    actionError.value = "";
     await updatePlace(tripId, place.id, {
       estimated_duration_min: parseInt(newDuration) || 30,
     });
     place.estimated_duration_min = parseInt(newDuration) || 30;
   } catch (e) {
-    actionError.value = `Failed to update duration: ${e.message}`;
+    showToast(`Failed to update duration: ${e.message}`);
   }
 }
 
@@ -369,7 +402,7 @@ async function askWhatNext() {
     // Highlight top recommendation on map
     highlightRecommendation();
   } catch (e) {
-    actionError.value = `What Next? failed: ${e.message}`;
+    showToast(`What Next? failed: ${e.message}`);
     nextRecs.value = null;
   } finally {
     nextLoading.value = false;
@@ -431,13 +464,12 @@ function highlightRecommendation() {
 async function handleCheckin(placeId, action) {
   try {
     checkinLoading.value = true;
-    actionError.value = "";
     await checkinPlace(tripId, placeId, action);
     showArrivePicker.value = false;
     await loadTrip();
     await loadFeasibility();
   } catch (e) {
-    actionError.value = `Check-in failed: ${e.message}`;
+    showToast(`Check-in failed: ${e.message}`);
   } finally {
     checkinLoading.value = false;
   }
@@ -499,6 +531,35 @@ function dismissAlert(id) {
   alerts.value = alerts.value.filter((a) => a.id !== id);
 }
 
+function showToast(message, type = "error") {
+  const id = Date.now() + Math.random();
+  toasts.value.push({ id, message, type });
+  if (toasts.value.length > 5) toasts.value.shift();
+  setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id);
+  }, 5000);
+}
+
+function copyTripUrl() {
+  navigator.clipboard
+    .writeText(window.location.href)
+    .then(() => showToast("Trip URL copied!", "success"))
+    .catch(() => showToast("Failed to copy URL"));
+}
+
+function handleOnline() {
+  isOffline.value = false;
+  showToast("Back online", "success");
+  if (trip.value) {
+    loadFeasibility();
+    connectStream();
+  }
+}
+
+function handleOffline() {
+  isOffline.value = true;
+}
+
 function reconnectStream() {
   if (trip.value) connectStream();
 }
@@ -506,7 +567,6 @@ function reconnectStream() {
 async function changeTransportMode(newMode) {
   if (!trip.value || newMode === trip.value.transport_mode) return;
   modeChanging.value = true;
-  actionError.value = "";
   try {
     const updated = await updateTrip(tripId, { transport_mode: newMode });
     trip.value.transport_mode = updated.transport_mode;
@@ -514,7 +574,7 @@ async function changeTransportMode(newMode) {
     connectStream();
     if (nextRecs.value) await askWhatNext();
   } catch (e) {
-    actionError.value = `Failed to switch mode: ${e.message}`;
+    showToast(`Failed to switch mode: ${e.message}`);
   } finally {
     modeChanging.value = false;
   }
@@ -547,6 +607,8 @@ onMounted(async () => {
   }
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("online", handleOnline);
+  window.addEventListener("offline", handleOffline);
 });
 
 onUnmounted(() => {
@@ -560,16 +622,35 @@ onUnmounted(() => {
     userPositionMarker = null;
   }
   document.removeEventListener("visibilitychange", handleVisibilityChange);
+  window.removeEventListener("online", handleOnline);
+  window.removeEventListener("offline", handleOffline);
 });
 </script>
 
 <template>
   <div class="dashboard">
+    <!-- Toast notifications -->
+    <div class="toast-container">
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        :class="['toast', t.type]"
+        @click="toasts = toasts.filter((x) => x.id !== t.id)"
+      >
+        {{ t.message }}
+      </div>
+    </div>
+
     <div class="map-container">
       <div id="map"></div>
     </div>
 
     <div class="sidebar">
+      <!-- Offline indicator -->
+      <div v-if="isOffline" class="offline-banner">
+        You are offline — showing last known data
+      </div>
+
       <!-- Urgency alert banners -->
       <div
         v-for="a in alerts"
@@ -582,12 +663,36 @@ onUnmounted(() => {
       </div>
 
       <div v-if="loadError" class="error">{{ loadError }}</div>
-      <div v-if="actionError" class="error" @click="actionError = ''">
-        {{ actionError }} <small>(click to dismiss)</small>
+
+      <!-- Trip Ended state -->
+      <div v-if="trip && tripEnded" class="trip-ended-banner">
+        <h3>Trip ended</h3>
+        <p>
+          You visited {{ tripSummary.visited }} of {{ tripSummary.total }} places
+          <span v-if="tripSummary.skipped">
+            ({{ tripSummary.skipped }} skipped)
+          </span>
+        </p>
+      </div>
+
+      <!-- All Places Done summary -->
+      <div v-if="trip && allPlacesDone && !tripEnded" class="all-done-banner">
+        <h3>All done!</h3>
+        <p>
+          You visited {{ tripSummary.visited }} of {{ tripSummary.total }} places!
+          <span v-if="tripSummary.skipped">
+            ({{ tripSummary.skipped }} skipped)
+          </span>
+        </p>
       </div>
 
       <div v-if="trip" class="trip-header">
-        <h2>{{ trip.city }}</h2>
+        <h2>
+          {{ trip.city }}
+          <button class="btn btn-small btn-copy" @click="copyTripUrl" title="Copy trip URL">
+            Share
+          </button>
+        </h2>
         <p>
           {{ trip.date }} &middot; {{ trip.start_time }}&ndash;{{
             trip.end_time
@@ -813,13 +918,20 @@ onUnmounted(() => {
       <!-- Remaining (pending) -->
       <div class="place-section">
         <h3 class="section-title">Remaining ({{ pendingPlaces.length }})</h3>
+        <!-- Loading skeleton -->
+        <div v-if="feasLoading && pendingPlaces.length" class="skeleton-list">
+          <div v-for="p in pendingPlaces" :key="'sk-' + p.id" class="skeleton-item">
+            <div class="skeleton-dot"></div>
+            <div class="skeleton-text"></div>
+          </div>
+        </div>
         <p
           v-if="
             !pendingPlaces.length && !donePlaces.length && !skippedPlaces.length
           "
           class="empty"
         >
-          No places added yet. Search and add some.
+          No places added yet. Search above to find and add places.
         </p>
         <ul class="place-list">
           <li v-for="p in pendingPlaces" :key="p.id" class="place-item">
@@ -1291,17 +1403,170 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  animation: toast-in 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.toast.error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #ef4444;
+}
+
+.toast.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #22c55e;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.offline-banner {
+  padding: 8px 14px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  color: #92400e;
+  font-size: 13px;
+  text-align: center;
+}
+
+.trip-ended-banner,
+.all-done-banner {
+  padding: 16px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.trip-ended-banner {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+}
+
+.trip-ended-banner h3 {
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.all-done-banner {
+  background: #dcfce7;
+  border: 1px solid #22c55e;
+}
+
+.all-done-banner h3 {
+  color: #166534;
+  margin-bottom: 4px;
+}
+
+.btn-copy {
+  font-size: 12px;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.skeleton-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--border);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-text {
+  flex: 1;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--border);
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 @media (max-width: 768px) {
   .dashboard {
     flex-direction: column;
   }
   .map-container {
-    flex: 0 0 50vh;
+    flex: 0 0 40vh;
   }
   .sidebar {
     flex: 1;
     border-left: none;
     border-top: 1px solid var(--border);
+    padding: 12px;
+  }
+  .trip-header h2 {
+    font-size: 1.2rem;
+  }
+  .place-controls {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .search-bar {
+    flex-direction: column;
+  }
+  .next-primary {
+    flex-direction: column;
+  }
+  .next-actions {
+    flex-direction: row;
+  }
+  .stats-line {
+    flex-wrap: wrap;
+    font-size: 12px;
+  }
+  .toast-container {
+    left: 16px;
+    right: 16px;
   }
 }
 </style>

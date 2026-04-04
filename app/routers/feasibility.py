@@ -1,6 +1,7 @@
 """Feasibility endpoint."""
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
 from typing import Any
@@ -34,6 +35,46 @@ class FeasibilityContext:
     endpoint_idx: int
     place_names: dict[int, str] = field(default_factory=dict)
     place_priorities: dict[int, str] = field(default_factory=dict)
+
+
+_SPEED_MPS: dict[str, float] = {
+    "foot": 1.4,  # ~5 km/h walking
+    "bicycle": 4.2,  # ~15 km/h cycling
+    "car": 8.3,  # ~30 km/h urban driving
+}
+
+
+def _haversine_distance_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    """Great-circle distance in meters between two lon/lat points."""
+    r = 6_371_000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    )
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _haversine_matrix(coords: list[list[float]], profile: str) -> list[list[float]]:
+    """Build a travel-time matrix (seconds) from straight-line distances."""
+    speed = _SPEED_MPS.get(profile, 1.4)
+    detour = 1.4  # straight-line to road-network multiplier
+    n = len(coords)
+    matrix: list[list[float]] = []
+    for i in range(n):
+        row: list[float] = []
+        for j in range(n):
+            if i == j:
+                row.append(0.0)
+            else:
+                d = _haversine_distance_m(
+                    coords[i][0], coords[i][1], coords[j][0], coords[j][1]
+                )
+                row.append(d * detour / speed)
+        matrix.append(row)
+    return matrix
 
 
 async def compute_feasibility(
@@ -110,9 +151,16 @@ async def compute_feasibility(
         coords.append([p["lon"], p["lat"]])
     coords.append([trip["end_lon"], trip["end_lat"]])
 
-    matrix: list[list[float]] = await get_distance_matrix(
-        coords, trip["transport_mode"]
-    )
+    try:
+        matrix: list[list[float]] = await get_distance_matrix(
+            coords, trip["transport_mode"]
+        )
+    except (ValueError, Exception):
+        logger.warning(
+            "OSRM unreachable for trip %s — falling back to straight-line estimates",
+            trip_id,
+        )
+        matrix = _haversine_matrix(coords, trip["transport_mode"])
 
     endpoint_idx: int = len(places) + 1
 
