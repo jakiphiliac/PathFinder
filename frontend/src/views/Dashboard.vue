@@ -668,7 +668,8 @@ onUnmounted(() => {
       <div v-if="trip && tripEnded" class="trip-ended-banner">
         <h3>Trip ended</h3>
         <p>
-          You visited {{ tripSummary.visited }} of {{ tripSummary.total }} places
+          You visited {{ tripSummary.visited }} of
+          {{ tripSummary.total }} places
           <span v-if="tripSummary.skipped">
             ({{ tripSummary.skipped }} skipped)
           </span>
@@ -679,7 +680,8 @@ onUnmounted(() => {
       <div v-if="trip && allPlacesDone && !tripEnded" class="all-done-banner">
         <h3>All done!</h3>
         <p>
-          You visited {{ tripSummary.visited }} of {{ tripSummary.total }} places!
+          You visited {{ tripSummary.visited }} of
+          {{ tripSummary.total }} places!
           <span v-if="tripSummary.skipped">
             ({{ tripSummary.skipped }} skipped)
           </span>
@@ -689,7 +691,11 @@ onUnmounted(() => {
       <div v-if="trip" class="trip-header">
         <h2>
           {{ trip.city }}
-          <button class="btn btn-small btn-copy" @click="copyTripUrl" title="Copy trip URL">
+          <button
+            class="btn btn-small btn-copy"
+            @click="copyTripUrl"
+            title="Copy trip URL"
+          >
             Share
           </button>
         </h2>
@@ -920,7 +926,11 @@ onUnmounted(() => {
         <h3 class="section-title">Remaining ({{ pendingPlaces.length }})</h3>
         <!-- Loading skeleton -->
         <div v-if="feasLoading && pendingPlaces.length" class="skeleton-list">
-          <div v-for="p in pendingPlaces" :key="'sk-' + p.id" class="skeleton-item">
+          <div
+            v-for="p in pendingPlaces"
+            :key="'sk-' + p.id"
+            class="skeleton-item"
+          >
             <div class="skeleton-dot"></div>
             <div class="skeleton-text"></div>
           </div>
