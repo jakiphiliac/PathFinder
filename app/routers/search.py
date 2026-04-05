@@ -72,7 +72,7 @@ async def _search_overpass(
     """Query Overpass for named POIs near location. Returns None if all endpoints fail."""
     safe_q: str = re.escape(q)
     query: str = (
-        f"[out:json][timeout:8];"
+        f"[out:json][timeout:3];"
         f"("
         f'node(around:{radius},{lat},{lon})["name"~"{safe_q}",i];'
         f'way(around:{radius},{lat},{lon})["name"~"{safe_q}",i];'
@@ -84,9 +84,11 @@ async def _search_overpass(
     for endpoint in OVERPASS_ENDPOINTS:
         try:
             if client is not None:
-                resp = await client.post(endpoint, data={"data": query})
+                resp = await client.post(
+                    endpoint, data={"data": query}, timeout=4.0
+                )
             else:
-                async with httpx.AsyncClient(timeout=10.0) as tmp:
+                async with httpx.AsyncClient(timeout=4.0) as tmp:
                     resp = await tmp.post(endpoint, data={"data": query})
             if resp.status_code != 200:
                 continue
@@ -103,35 +105,29 @@ async def _search_nominatim(q: str, lat: float, lon: float) -> list[dict[str, An
     """Geocode query via Nominatim and return results in the same shape as Overpass results."""
     try:
         client = client_instance()
+        nominatim_params = {
+            "q": q,
+            "format": "json",
+            "limit": 10,
+            "addressdetails": 0,
+            "extratags": 1,
+            "viewbox": f"{lon - 0.1},{lat + 0.1},{lon + 0.1},{lat - 0.1}",
+            "bounded": 1,
+        }
         if client is not None:
             resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
-                params={
-                    "q": q,
-                    "format": "json",
-                    "limit": 10,
-                    "addressdetails": 0,
-                    "extratags": 1,
-                    "viewbox": f"{lon - 0.1},{lat + 0.1},{lon + 0.1},{lat - 0.1}",
-                    "bounded": 1,
-                },
+                params=nominatim_params,
                 headers=NOMINATIM_HEADERS,
+                timeout=5.0,
             )
         else:
             async with httpx.AsyncClient(
-                timeout=10.0, headers=NOMINATIM_HEADERS
+                timeout=5.0, headers=NOMINATIM_HEADERS
             ) as tmp:
                 resp = await tmp.get(
                     "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": q,
-                        "format": "json",
-                        "limit": 10,
-                        "addressdetails": 0,
-                        "extratags": 1,
-                        "viewbox": f"{lon - 0.1},{lat + 0.1},{lon + 0.1},{lat - 0.1}",
-                        "bounded": 1,
-                    },
+                    params=nominatim_params,
                 )
         resp.raise_for_status()
         data: list[dict[str, Any]] = resp.json()

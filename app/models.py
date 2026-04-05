@@ -155,3 +155,34 @@ class NextRecommendation(BaseModel):
 class NextResponse(BaseModel):
     recommendations: list[NextRecommendation]
     message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Baseline route
+# ---------------------------------------------------------------------------
+
+
+class BaselineNNResult(BaseModel):
+    tour: list[int]
+    cost: float
+    coords: list[list[float]]
+
+
+class BaselineSwapEvent(BaseModel):
+    i: int
+    j: int
+    tour: list[int]
+    cost: float
+    accepted: bool
+    coords: list[list[float]]
+
+
+class BaselineRoadSegment(BaseModel):
+    from_idx: int
+    to_idx: int
+    geometry: str  # encoded polyline (or empty for straight-line fallback)
+
+
+class BaselineDone(BaseModel):
+    tour: list[int]
+    cost: float

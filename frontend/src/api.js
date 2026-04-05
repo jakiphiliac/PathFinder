@@ -102,6 +102,57 @@ export async function getFeasibility(tripId, lat, lon) {
  * Connect to the SSE stream for real-time feasibility updates and urgency alerts.
  * Returns the EventSource instance — caller must call .close() on unmount.
  */
+/**
+ * Connect to the baseline route optimization SSE stream.
+ * Returns the EventSource instance — caller must call .close() on cleanup.
+ */
+export function connectBaselineStream(
+  tripId,
+  lat,
+  lon,
+  { onNNResult, onSwapAccept, onRoadSegment, onDone, onError },
+) {
+  const params = new URLSearchParams();
+  if (lat != null) params.set("lat", lat);
+  if (lon != null) params.set("lon", lon);
+  const es = new EventSource(
+    `/api/trips/${tripId}/baseline/stream?${params}`,
+  );
+
+  es.addEventListener("nn_result", (e) => {
+    try {
+      onNNResult(JSON.parse(e.data));
+    } catch (err) {
+      console.warn("SSE parse error (nn_result):", err);
+    }
+  });
+  es.addEventListener("swap_accept", (e) => {
+    try {
+      onSwapAccept(JSON.parse(e.data));
+    } catch (err) {
+      console.warn("SSE parse error (swap_accept):", err);
+    }
+  });
+  es.addEventListener("road_segment", (e) => {
+    try {
+      onRoadSegment(JSON.parse(e.data));
+    } catch (err) {
+      console.warn("SSE parse error (road_segment):", err);
+    }
+  });
+  es.addEventListener("done", (e) => {
+    try {
+      onDone(JSON.parse(e.data));
+    } catch (err) {
+      console.warn("SSE parse error (done):", err);
+    }
+    es.close();
+  });
+  if (onError) es.onerror = onError;
+
+  return es;
+}
+
 export function connectTripStream(
   tripId,
   lat,

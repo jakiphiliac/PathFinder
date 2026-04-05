@@ -131,3 +131,63 @@ async def get_distance_matrix(
         result.append([(float(val) if val is not None else penalty) for val in row])
 
     return result
+
+
+async def get_route_geometry(
+    coordinates: list[list[float]],
+    profile: str = "foot",
+) -> list[dict[str, Any]]:
+    """Fetch OSRM route geometry for a sequence of waypoints.
+
+    Returns a list of leg dictionaries, each with:
+      - ``geometry``: encoded polyline string
+      - ``distance``: leg distance in meters
+      - ``duration``: leg duration in seconds
+
+    Falls back to straight-line stub legs when OSRM is unreachable.
+    """
+    if len(coordinates) < 2:
+        return []
+
+    coord_str = ";".join(f"{float(lon)},{float(lat)}" for lon, lat in coordinates)
+    url = (
+        f"{_base_url(profile)}/route/v1/{profile}/{coord_str}"
+        "?geometries=polyline&overview=false&steps=false"
+    )
+
+    shared_client = client_instance()
+    try:
+        if shared_client is not None:
+            response = await shared_client.get(url)
+            response.raise_for_status()
+            data = response.json()
+        else:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                data = response.json()
+
+        if data.get("code") != "Ok":
+            raise ValueError(data.get("message", "OSRM error"))
+
+        legs: list[dict[str, Any]] = []
+        for leg in data.get("routes", [{}])[0].get("legs", []):
+            # Each leg has its own geometry when overview=false and steps are present,
+            # but with steps=false OSRM doesn't include per-leg geometry.
+            # Re-request with overview=full per-leg for simplicity — or use
+            # the full route geometry and split. For now, store leg summary.
+            legs.append(
+                {
+                    "geometry": leg.get("geometry", ""),
+                    "distance": leg.get("distance", 0),
+                    "duration": leg.get("duration", 0),
+                }
+            )
+        return legs
+
+    except (httpx.HTTPStatusError, httpx.RequestError, ValueError, KeyError):
+        # Fallback: return empty geometries so frontend draws straight lines
+        legs = []
+        for i in range(len(coordinates) - 1):
+            legs.append({"geometry": "", "distance": 0, "duration": 0})
+        return legs

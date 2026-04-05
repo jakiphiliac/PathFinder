@@ -13,7 +13,14 @@ import {
   getNextRecommendation,
   checkinPlace,
   connectTripStream,
+  connectBaselineStream,
 } from "../api.js";
+import {
+  drawNNRoute,
+  draw2optRoute,
+  drawRoadSegment,
+  clearRouteLayers,
+} from "../routeDrawing.js";
 
 // Fix Leaflet default marker icon paths for bundled builds
 delete L.Icon.Default.prototype._getIconUrl;
@@ -113,11 +120,26 @@ const toasts = ref([]); // toast notifications
 const isOffline = ref(!navigator.onLine);
 const feasLoading = ref(true); // loading skeleton state
 
+const routeCalculating = ref(false);
+const routeReady = ref(false);
+
+// Click-to-add state
+const addingByClick = ref(false);
+const showClickAddModal = ref(false);
+const clickAddLat = ref(null);
+const clickAddLon = ref(null);
+const clickAddName = ref("");
+const clickAddPriority = ref("want");
+const clickAddDuration = ref(30);
+const clickAddCategory = ref("");
+
 let map = null;
 let eventSource = null;
 let markersLayer = null;
 let searchMarkersLayer = null;
 let userPositionMarker = null;
+let routeLayerGroup = null;
+let baselineES = null;
 
 // Computed stats
 const visitedCount = computed(
@@ -266,15 +288,47 @@ function initMap() {
   }).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
   searchMarkersLayer = L.layerGroup().addTo(map);
+  routeLayerGroup = L.layerGroup().addTo(map);
 
-  map.on("click", (e) => {
-    if (!settingPosition.value) return;
+  map.on("click", async (e) => {
     const { lat, lng } = e.latlng;
-    userLat.value = lat;
-    userLon.value = lng;
-    updateUserPositionMarker(lat, lng);
-    settingPosition.value = false;
-    loadFeasibility();
+
+    if (settingPosition.value) {
+      userLat.value = lat;
+      userLon.value = lng;
+      updateUserPositionMarker(lat, lng);
+      settingPosition.value = false;
+      map.getContainer().style.cursor = "";
+      loadFeasibility();
+      return;
+    }
+
+    if (addingByClick.value) {
+      addingByClick.value = false;
+      map.getContainer().style.cursor = "";
+      clickAddLat.value = lat;
+      clickAddLon.value = lng;
+      // Prefill name via reverse-geocode (best-effort, don't block the modal)
+      clickAddName.value = "";
+      showClickAddModal.value = true;
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+          { headers: { "User-Agent": "PathFinder/2.0" } },
+        );
+        if (res.ok) {
+          const data = await res.json();
+          clickAddName.value =
+            data.name ||
+            data.address?.tourism ||
+            data.address?.amenity ||
+            data.address?.road ||
+            "";
+        }
+      } catch {
+        // Prefill failed — user can type a name manually
+      }
+    }
   });
 }
 
@@ -354,6 +408,7 @@ async function handleAddPlace(result) {
     });
     searchResults.value = searchResults.value.filter((r) => r !== result);
     updateSearchMarkers();
+    clearRoute();
     await loadTrip();
     await loadFeasibility();
   } catch (e) {
@@ -364,6 +419,7 @@ async function handleAddPlace(result) {
 async function handleDeletePlace(placeId) {
   try {
     await deletePlace(tripId, placeId);
+    clearRoute();
     await loadTrip();
     await loadFeasibility();
   } catch (e) {
@@ -564,6 +620,108 @@ function reconnectStream() {
   if (trip.value) connectStream();
 }
 
+function toggleSetPosition() {
+  addingByClick.value = false;
+  settingPosition.value = !settingPosition.value;
+  if (map) {
+    map.getContainer().style.cursor = settingPosition.value ? "crosshair" : "";
+  }
+}
+
+function toggleAddByClick() {
+  settingPosition.value = false;
+  addingByClick.value = !addingByClick.value;
+  if (map) {
+    map.getContainer().style.cursor = addingByClick.value ? "crosshair" : "";
+  }
+}
+
+function cancelClickAdd() {
+  showClickAddModal.value = false;
+  clickAddName.value = "";
+  clickAddPriority.value = "want";
+  clickAddDuration.value = 30;
+  clickAddCategory.value = "";
+}
+
+async function confirmClickAdd() {
+  const name = clickAddName.value.trim();
+  if (!name) return;
+  try {
+    await addPlace(tripId, {
+      name,
+      lat: clickAddLat.value,
+      lon: clickAddLon.value,
+      category: clickAddCategory.value.trim() || null,
+      estimated_duration_min: clickAddDuration.value,
+      priority: clickAddPriority.value,
+    });
+    cancelClickAdd();
+    clearRoute();
+    await loadTrip();
+    await loadFeasibility();
+  } catch (e) {
+    showToast(`Failed to add place: ${e.message}`);
+  }
+}
+
+function clearRoute() {
+  if (baselineES) {
+    baselineES.close();
+    baselineES = null;
+  }
+  if (routeLayerGroup) clearRouteLayers(routeLayerGroup);
+  routeReady.value = false;
+  routeCalculating.value = false;
+}
+
+function calculateRoute() {
+  if (!trip.value || pendingPlaces.value.length < 2) return;
+  clearRoute();
+  routeCalculating.value = true;
+
+  const lat = userLat.value ?? trip.value.start_lat;
+  const lon = userLon.value ?? trip.value.start_lon;
+
+  // Track the current NN/2-opt polyline so we can replace it
+  let currentPolyline = null;
+
+  baselineES = connectBaselineStream(tripId, lat, lon, {
+    onNNResult(data) {
+      // Draw initial NN route (gray dashed)
+      if (routeLayerGroup) clearRouteLayers(routeLayerGroup);
+      currentPolyline = drawNNRoute(map, data.coords, routeLayerGroup);
+    },
+    onSwapAccept(data) {
+      // Replace current polyline with improved route (green)
+      if (routeLayerGroup) clearRouteLayers(routeLayerGroup);
+      currentPolyline = draw2optRoute(map, data.coords, true, routeLayerGroup);
+    },
+    onRoadSegment(data) {
+      // Draw OSRM road segment (blue) — accumulate on top of the overview line.
+      // Do NOT remove currentPolyline here; we defer that to onDone so the
+      // overview stays visible while road segments are loading in one by one.
+      drawRoadSegment(map, data.geometry, null, routeLayerGroup);
+    },
+    onDone() {
+      // All road segments drawn — now remove the straight-line overview so only
+      // the actual road geometry (or nothing if OSRM was unreachable) remains.
+      if (currentPolyline && routeLayerGroup) {
+        routeLayerGroup.removeLayer(currentPolyline);
+        currentPolyline = null;
+      }
+      routeCalculating.value = false;
+      routeReady.value = true;
+      baselineES = null;
+    },
+    onError() {
+      routeCalculating.value = false;
+      showToast("Route calculation failed");
+      baselineES = null;
+    },
+  });
+}
+
 async function changeTransportMode(newMode) {
   if (!trip.value || newMode === trip.value.transport_mode) return;
   modeChanging.value = true;
@@ -612,6 +770,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (baselineES) {
+    baselineES.close();
+    baselineES = null;
+  }
   if (eventSource) {
     eventSource.close();
     eventSource = null;
@@ -733,9 +895,17 @@ onUnmounted(() => {
         {{ remainingCount }} &middot; Reachable: {{ reachableCount }}
         <button
           :class="['btn', 'btn-small', settingPosition ? 'btn-active' : '']"
-          @click="settingPosition = !settingPosition"
+          @click="toggleSetPosition"
+          title="Click this, then click anywhere on the map to set your current position for feasibility calculations"
         >
-          {{ settingPosition ? "Click map..." : "Set position" }}
+          {{ settingPosition ? "Click map to pin..." : "Pin my location" }}
+        </button>
+        <button
+          :class="['btn', 'btn-small', addingByClick ? 'btn-active' : '']"
+          @click="toggleAddByClick"
+          title="Click this, then click anywhere on the map to add a destination at that location"
+        >
+          {{ addingByClick ? "Click map to place..." : "+ Add by clicking" }}
         </button>
         <button
           class="btn btn-small btn-refresh"
@@ -747,6 +917,27 @@ onUnmounted(() => {
           "
         >
           Refresh
+        </button>
+      </div>
+
+      <!-- Calculate Route -->
+      <div
+        v-if="trip && pendingPlaces.length >= 2"
+        class="route-section"
+      >
+        <button
+          class="btn btn-route"
+          @click="calculateRoute"
+          :disabled="routeCalculating"
+        >
+          {{ routeCalculating ? "Calculating..." : routeReady ? "Recalculate Route" : "Calculate Route" }}
+        </button>
+        <button
+          v-if="routeReady"
+          class="btn btn-small"
+          @click="clearRoute"
+        >
+          Clear Route
         </button>
       </div>
 
@@ -1029,6 +1220,70 @@ onUnmounted(() => {
             </div>
           </li>
         </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Click-to-add modal -->
+  <div v-if="showClickAddModal" class="modal-overlay" @click.self="cancelClickAdd">
+    <div class="modal">
+      <h3 class="modal-title">Add destination</h3>
+      <p class="modal-coords">
+        {{ clickAddLat?.toFixed(5) }}, {{ clickAddLon?.toFixed(5) }}
+      </p>
+
+      <label class="modal-label">
+        Name
+        <input
+          v-model="clickAddName"
+          type="text"
+          class="modal-input"
+          placeholder="Place name"
+          autofocus
+          @keyup.enter="confirmClickAdd"
+          @keyup.escape="cancelClickAdd"
+        />
+      </label>
+
+      <label class="modal-label">
+        Category <span class="modal-hint">(optional)</span>
+        <input
+          v-model="clickAddCategory"
+          type="text"
+          class="modal-input"
+          placeholder="e.g. cafe, museum, viewpoint"
+        />
+      </label>
+
+      <label class="modal-label">
+        Priority
+        <select v-model="clickAddPriority" class="modal-input">
+          <option value="must">Must visit</option>
+          <option value="want">Want to visit</option>
+          <option value="if_time">If time allows</option>
+        </select>
+      </label>
+
+      <label class="modal-label">
+        Stay duration (min)
+        <input
+          v-model.number="clickAddDuration"
+          type="number"
+          min="5"
+          step="5"
+          class="modal-input modal-input-narrow"
+        />
+      </label>
+
+      <div class="modal-actions">
+        <button
+          class="btn btn-primary"
+          :disabled="!clickAddName.trim()"
+          @click="confirmClickAdd"
+        >
+          Add
+        </button>
+        <button class="btn" @click="cancelClickAdd">Cancel</button>
       </div>
     </div>
   </div>
@@ -1539,6 +1794,99 @@ onUnmounted(() => {
   50% {
     opacity: 1;
   }
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modal {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  width: min(360px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-h);
+}
+
+.modal-coords {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  font-family: monospace;
+}
+
+.modal-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.modal-hint {
+  font-weight: normal;
+  opacity: 0.6;
+}
+
+.modal-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 13px;
+}
+
+.modal-input-narrow {
+  width: 80px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.route-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-route {
+  background: #0d6efd;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn-route:hover:not(:disabled) {
+  background: #0b5ed7;
+}
+
+.btn-route:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 @media (max-width: 768px) {
