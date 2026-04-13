@@ -14,6 +14,7 @@ import {
   checkinPlace,
   connectTripStream,
   getTrajectory,
+  archiveTrip,
 } from "../api.js";
 
 // Fix Leaflet default marker icon paths for bundled builds
@@ -112,6 +113,10 @@ const modeChanging = ref(false);
 const nextSkipIndex = ref(0); // which recommendation is "primary"
 const alerts = ref([]); // urgency alert banners
 const toasts = ref([]); // toast notifications
+const navigatingToEnd = ref(
+  localStorage.getItem(`pathfinder_navigating_${tripId}`) === "1",
+);
+const archiving = ref(false);
 const isOffline = ref(!navigator.onLine);
 const feasLoading = ref(true); // loading skeleton state
 
@@ -193,6 +198,15 @@ const allPlacesDone = computed(() => {
   return places.value.every(
     (p) => p.status === "done" || p.status === "skipped",
   );
+});
+
+const allInfeasible = computed(() => {
+  if (!trip.value || pendingPlaces.value.length === 0) return false;
+  if (feasLoading.value || feasibility.value.size === 0) return false;
+  return pendingPlaces.value.every((p) => {
+    const f = feasibility.value.get(p.id);
+    return f?.color === "gray";
+  });
 });
 
 const isOpenTrip = computed(() => {
@@ -492,6 +506,12 @@ function getLastPosition() {
     const last = trajectorySegments.value[trajectorySegments.value.length - 1];
     return { lat: last.to_lat, lon: last.to_lon };
   }
+  // Last confirmed check-in takes priority over GPS — recommendations are
+  // calculated from this position, and GPS may be stale or inaccurate.
+  const lastVisited = [...places.value]
+    .filter((p) => p.status === "done" || p.status === "visiting")
+    .at(-1);
+  if (lastVisited) return { lat: lastVisited.lat, lon: lastVisited.lon };
   if (userLat.value != null) return { lat: userLat.value, lon: userLon.value };
   if (trip.value)
     return { lat: trip.value.start_lat, lon: trip.value.start_lon };
@@ -523,7 +543,21 @@ function navigateToPlace(rec) {
 
 function navigateToFinalDestination() {
   if (!trip.value) return;
+  localStorage.setItem(`pathfinder_navigating_${tripId}`, "1");
+  navigatingToEnd.value = true;
   openGoogleMaps(trip.value.end_lat, trip.value.end_lon);
+}
+
+async function confirmArrivalAtEnd() {
+  archiving.value = true;
+  try {
+    await archiveTrip(tripId);
+    localStorage.removeItem(`pathfinder_navigating_${tripId}`);
+    router.push(`/trip/${tripId}/summary`);
+  } catch (e) {
+    console.error("Archive failed", e);
+    archiving.value = false;
+  }
 }
 
 let highlightMarker = null;
@@ -883,7 +917,7 @@ onUnmounted(() => {
       <div v-if="loadError" class="error">{{ loadError }}</div>
 
       <!-- Trip Ended state -->
-      <div v-if="trip && tripEnded" class="trip-ended-banner">
+      <div v-if="trip && tripEnded && places.length > 0" class="trip-ended-banner">
         <h3>Trip ended</h3>
         <p>
           You visited {{ tripSummary.visited }} of
@@ -984,8 +1018,16 @@ onUnmounted(() => {
       </div>
 
       <!-- Head to final destination / back to start -->
-      <div v-if="trip && allPlacesDone" class="final-destination-banner">
-        <p v-if="isOpenTrip">
+      <div v-if="trip && (allPlacesDone || allInfeasible) && !navigatingToEnd" class="final-destination-banner">
+        <p v-if="allInfeasible && !allPlacesDone">
+          No more reachable places —
+          {{
+            isOpenTrip
+              ? "head to your final destination early"
+              : "head back to your starting point early"
+          }}.
+        </p>
+        <p v-else-if="isOpenTrip">
           All places visited! Head to your final destination.
         </p>
         <p v-else>All places visited! Head back to your starting point.</p>
@@ -997,22 +1039,58 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- Arrived at final destination confirmation -->
+      <div v-if="navigatingToEnd" class="arrived-final-banner">
+        <p>
+          Did you arrive at your
+          {{ isOpenTrip ? "final destination" : "starting point" }}?
+        </p>
+        <button
+          class="btn btn-primary"
+          :disabled="archiving"
+          @click="confirmArrivalAtEnd"
+        >
+          {{ archiving ? "Finishing..." : "Yes, I'm done!" }}
+        </button>
+        <button
+          class="btn btn-secondary"
+          @click="
+            () => {
+              navigatingToEnd = false;
+              localStorage.removeItem(`pathfinder_navigating_${tripId}`);
+            }
+          "
+        >
+          Not yet
+        </button>
+      </div>
+
       <!-- What Next? — hidden when all places are done -->
       <div v-if="!allPlacesDone" class="next-section">
         <button
           class="btn btn-next"
-          :disabled="nextLoading || !pendingPlaces.length"
+          :disabled="nextLoading || !pendingPlaces.length || !!pendingArrivalPlace || !!visitingPlace"
           :title="
-            pendingPlaces.length ? '' : 'Add places to enable recommendations'
+            pendingArrivalPlace
+              ? 'Confirm your arrival first'
+              : visitingPlace
+                ? 'Mark your current visit as done first'
+                : pendingPlaces.length
+                  ? ''
+                  : 'Add places to enable recommendations'
           "
           @click="askWhatNext"
         >
           {{
             nextLoading
               ? "Thinking..."
-              : pendingPlaces.length
-                ? "What Next?"
-                : "No places"
+              : pendingArrivalPlace
+                ? "Arrive first"
+                : visitingPlace
+                  ? "Finish visit first"
+                  : pendingPlaces.length
+                    ? "What Next?"
+                    : "No places"
           }}
         </button>
         <p v-if="!pendingPlaces.length" class="next-helper">
@@ -1048,7 +1126,7 @@ onUnmounted(() => {
                     navigateToPlace(nextRecs.recommendations[nextSkipIndex])
                   "
                 >
-                  Go
+                  Navigate there
                 </button>
                 <button class="btn btn-small" @click="skipRecommendation">
                   Skip
@@ -1071,9 +1149,14 @@ onUnmounted(() => {
           </template>
 
           <div v-else class="next-empty">
-            {{
-              nextRecs.message || "No reachable places. Head to your endpoint."
-            }}
+            <p>{{ nextRecs.message || "No reachable places right now." }}</p>
+            <button
+              class="btn btn-primary"
+              style="margin-top: 0.75rem"
+              @click="navigateToFinalDestination"
+            >
+              {{ isOpenTrip ? "Go to Final Destination" : "Head Back to Start" }}
+            </button>
           </div>
         </div>
       </div>
@@ -1977,6 +2060,20 @@ onUnmounted(() => {
 }
 
 .final-destination-banner p {
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.arrived-final-banner {
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.arrived-final-banner p {
   margin-bottom: 8px;
   font-weight: 500;
 }

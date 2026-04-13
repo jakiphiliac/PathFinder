@@ -144,28 +144,28 @@ async def _record_trajectory(
 
         to_lat, to_lon = place["lat"], place["lon"]
 
-        # Check OSRM health endpoint for the chosen profile; skip if not healthy.
+        # Check OSRM is reachable using /nearest — /health returns 400 on this version.
         try:
             osrm_base = {
                 "foot": settings.osrm_foot_url,
                 "car": settings.osrm_car_url,
                 "bicycle": settings.osrm_bicycle_url,
             }.get(transport_mode, settings.osrm_foot_url)
-            health_url = f"{osrm_base}/health"
+            probe_url = f"{osrm_base}/nearest/v1/{transport_mode}/19.0402,47.4979"
             client = client_instance()
             if client is not None:
-                resp = await client.get(health_url, timeout=1.0)
+                resp = await client.get(probe_url, timeout=1.0)
             else:
                 async with httpx.AsyncClient(timeout=1.0) as tmp:
-                    resp = await tmp.get(health_url)
+                    resp = await tmp.get(probe_url)
             if resp.status_code != 200:
                 logger.warning(
-                    "OSRM health check failed (%s) — skipping trajectory segment",
-                    health_url,
+                    "OSRM probe failed (%s) — skipping trajectory segment",
+                    probe_url,
                 )
                 return None
         except Exception:
-            logger.warning("OSRM health check error — skipping trajectory segment")
+            logger.warning("OSRM probe error — skipping trajectory segment")
             return None
 
         # Fetch OSRM route geometry

@@ -58,6 +58,8 @@ class TripResponse(BaseModel):
     date: str
     transport_mode: str
     timezone: str | None = "UTC"
+    status: str = "active"
+    completed_at: str | None = None
     created_at: str
     updated_at: str
 

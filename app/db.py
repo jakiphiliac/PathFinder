@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS trips (
     date TEXT NOT NULL,
     transport_mode TEXT NOT NULL DEFAULT 'foot',
     timezone TEXT NOT NULL DEFAULT 'UTC',
+    status TEXT NOT NULL DEFAULT 'active',
+    completed_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -91,6 +93,26 @@ async def _ensure_timezone_column(db: aiosqlite.Connection) -> None:
         )
 
 
+async def _ensure_status_columns(db: aiosqlite.Connection) -> None:
+    """Ensure `status` and `completed_at` columns exist on `trips`. Adds them if missing."""
+    cursor = await db.execute("PRAGMA table_info(trips)")
+    rows = await cursor.fetchall()
+
+    col_names: list[Any] = []
+    for row in rows:
+        try:
+            col_names.append(row["name"])  # type: ignore[index]
+        except Exception:
+            col_names.append(row[1])  # type: ignore[index]
+
+    if "status" not in col_names:
+        await db.execute(
+            "ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+        )
+    if "completed_at" not in col_names:
+        await db.execute("ALTER TABLE trips ADD COLUMN completed_at TEXT")
+
+
 CREATE_TRAJECTORY_SEGMENTS = """
 CREATE TABLE IF NOT EXISTS trajectory_segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -125,6 +147,7 @@ async def init_db() -> None:
         # If an older DB existed without the timezone column, add it.
         # _ensure_timezone_column inspects PRAGMA table_info and executes ALTER TABLE if needed.
         await _ensure_timezone_column(db)
+        await _ensure_status_columns(db)
 
         await db.execute(CREATE_PLACES)
         await db.execute(CREATE_DISTANCE_CACHE)

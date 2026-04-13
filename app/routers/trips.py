@@ -188,3 +188,27 @@ async def delete_trip(trip_id: str, db: aiosqlite.Connection = Depends(get_db)) 
     _ = await db.execute("DELETE FROM places WHERE trip_id = ?", (trip_id,))
     _ = await db.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
     await db.commit()
+
+
+@router.post("/trips/{trip_id}/archive", response_model=TripResponse)
+async def archive_trip(
+    trip_id: str,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> TripResponse:
+    cursor = await db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if row["status"] == "archived":
+        return TripResponse(**dict(row))
+    now: str = datetime.now(timezone.utc).isoformat()
+    await db.execute(
+        "UPDATE trips SET status = 'archived', completed_at = ?, updated_at = ? WHERE id = ?",
+        (now, now, trip_id),
+    )
+    await db.commit()
+    cursor = await db.execute("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    updated = await cursor.fetchone()
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return TripResponse(**dict(updated))

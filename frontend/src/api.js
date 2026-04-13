@@ -132,3 +132,8 @@ export function connectTripStream(
 
   return es;
 }
+
+export async function archiveTrip(id) {
+  const res = await fetch(`/api/trips/${id}/archive`, { method: "POST" });
+  return _json(res);
+}

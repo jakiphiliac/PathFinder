@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRouter } from "vue-router";
 import { createTrip, getTrip, geocode } from "../api.js";
 import L from "leaflet";
@@ -213,6 +213,13 @@ function useMyLocation() {
 const STORAGE_KEY = "pathfinder_trips";
 const pastTrips = ref([]);
 
+const activeTrips = computed(() =>
+  pastTrips.value.filter((t) => t.status !== "archived"),
+);
+const completedTrips = computed(() =>
+  pastTrips.value.filter((t) => t.status === "archived"),
+);
+
 function getSavedTripIds() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -252,6 +259,8 @@ async function loadPastTrips() {
         start_time: data.start_time,
         end_time: data.end_time,
         transport_mode: data.transport_mode,
+        status: data.status || "active",
+        completed_at: data.completed_at || null,
         visited,
         total,
       });
@@ -494,9 +503,11 @@ onUnmounted(() => {
       <!-- Trip History -->
       <div v-if="pastTrips.length" class="trip-history">
         <h2 class="history-title">Your Trips</h2>
-        <div class="trip-cards">
+
+        <!-- Active trips -->
+        <div v-if="activeTrips.length" class="trip-cards">
           <div
-            v-for="t in pastTrips"
+            v-for="t in activeTrips"
             :key="t.id"
             class="trip-card"
             @click="router.push(`/trip/${t.id}`)"
@@ -521,6 +532,39 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+
+        <!-- Completed trips -->
+        <template v-if="completedTrips.length">
+          <h3 class="history-subtitle">Completed</h3>
+          <div class="trip-cards">
+            <div
+              v-for="t in completedTrips"
+              :key="t.id"
+              class="trip-card trip-card-completed"
+              @click="router.push(`/trip/${t.id}/summary`)"
+            >
+              <div class="trip-card-header">
+                <strong>{{ t.city }}</strong>
+                <span class="trip-card-done-badge">✓ Done</span>
+                <span class="trip-card-date">{{ t.date }}</span>
+              </div>
+              <div class="trip-card-details">
+                <span>{{ t.start_time }}–{{ t.end_time }}</span>
+                <span class="trip-card-mode">{{ t.transport_mode }}</span>
+              </div>
+              <div class="trip-card-stats">
+                {{ t.visited }}/{{ t.total }} places visited
+              </div>
+              <button
+                class="trip-card-remove"
+                title="Remove from history"
+                @click.stop="removeTripId(t.id)"
+              >
+                &times;
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -855,6 +899,30 @@ select:focus {
 .trip-card-remove:hover {
   opacity: 1;
   color: #ef4444;
+}
+
+.history-subtitle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text);
+  opacity: 0.5;
+  margin: 1rem 0 0.4rem;
+}
+
+.trip-card-completed {
+  border-color: #4ade8044;
+  background: color-mix(in srgb, var(--surface) 95%, #4ade80 5%);
+}
+
+.trip-card-done-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #4ade80;
+  background: #4ade8022;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.35rem;
 }
 
 @media (max-width: 768px) {
