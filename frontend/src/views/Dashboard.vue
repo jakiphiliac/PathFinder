@@ -566,10 +566,8 @@ async function handleCheckin(placeId, action) {
     await loadTrip();
     await loadFeasibility();
 
-    // Auto-show What Next? after finishing a visit, or dismiss stale recs
-    if (action === "done" && pendingPlaces.value.length > 0) {
-      await askWhatNext();
-    } else if (pendingPlaces.value.length === 0) {
+    // Dismiss stale recs when all places are done
+    if (pendingPlaces.value.length === 0) {
       dismissNextCard();
     }
   } catch (e) {
@@ -586,6 +584,12 @@ function sortedByDistance(placeList) {
     const dB = (b.lat - userLat.value) ** 2 + (b.lon - userLon.value) ** 2;
     return dA - dB;
   });
+}
+
+function placeName(name) {
+  if (!name) return name;
+  const comma = name.indexOf(",");
+  return comma === -1 ? name : name.slice(0, comma).trim();
 }
 
 function dismissNextCard() {
@@ -1102,7 +1106,7 @@ onUnmounted(() => {
           class="pending-arrival-card"
         >
           <p class="picker-label">Did you arrive at:</p>
-          <strong>{{ pendingArrivalPlace.name }}</strong>
+          <strong>{{ placeName(pendingArrivalPlace.name) }}</strong>
           <div class="pending-arrival-actions">
             <button
               class="btn btn-primary"
@@ -1137,7 +1141,7 @@ onUnmounted(() => {
           :disabled="checkinLoading"
           @click="handleCheckin(visitingPlace.id, 'done')"
         >
-          Done visiting {{ visitingPlace.name }}
+          Done visiting {{ placeName(visitingPlace.name) }}
         </button>
 
         <!-- Arrive picker -->
@@ -1153,7 +1157,7 @@ onUnmounted(() => {
               <span class="feas-dot" :style="{ color: feasColorCss(p.id) }"
                 >&#9679;</span
               >
-              {{ p.name }}
+              {{ placeName(p.name) }}
             </li>
           </ul>
         </div>
@@ -1165,7 +1169,7 @@ onUnmounted(() => {
         <div class="place-item place-visiting">
           <div class="place-info">
             <span class="feas-dot" style="color: #3b82f6">&#9679;</span>
-            <strong>{{ visitingPlace.name }}</strong>
+            <strong>{{ placeName(visitingPlace.name) }}</strong>
             <span v-if="visitingPlace.category" class="category">{{
               visitingPlace.category
             }}</span>
@@ -1210,7 +1214,7 @@ onUnmounted(() => {
               <span class="feas-dot" :style="{ color: feasColorCss(p.id) }"
                 >&#9679;</span
               >
-              <strong>{{ p.name }}</strong>
+              <strong>{{ placeName(p.name) }}</strong>
               <span v-if="p.category" class="category">{{ p.category }}</span>
               <span v-if="p.opening_hours" class="hours">{{
                 p.opening_hours
@@ -1265,7 +1269,7 @@ onUnmounted(() => {
           <li v-for="p in donePlaces" :key="p.id" class="place-item place-done">
             <div class="place-info">
               <span class="feas-dot" style="color: #22c55e">&#10003;</span>
-              <strong>{{ p.name }}</strong>
+              <strong>{{ placeName(p.name) }}</strong>
               <span v-if="p.category" class="category">{{ p.category }}</span>
             </div>
           </li>
@@ -1285,7 +1289,7 @@ onUnmounted(() => {
           >
             <div class="place-info">
               <span class="feas-dot" style="color: #9ca3af">&#10005;</span>
-              <strong>{{ p.name }}</strong>
+              <strong>{{ placeName(p.name) }}</strong>
               <span v-if="p.category" class="category">{{ p.category }}</span>
             </div>
           </li>

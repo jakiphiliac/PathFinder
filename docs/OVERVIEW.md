@@ -2,20 +2,15 @@
 
 ## What is PathFinder?
 
-PathFinder is a **travel route optimizer** built as a thesis project. Given a list of places a user wants to visit in a day, it computes the most efficient visiting order while respecting each place's **opening hours** and the user's available time window.
-
-The project has evolved through two generations:
-
-- **v1 — Classical TSP Solver:** Takes a list of places, computes an optimal route using combinatorial optimization, and streams results in real-time.
-- **v2 — Feasibility-Guided Exploration Engine (current):** Instead of outputting a single "best" route, it gives the user a live dashboard showing which places are reachable right now, which are borderline, and which are effectively impossible — along with a "What Next?" recommendation engine.
+PathFinder is a **reactive journey companion** for city trip planning, built as a thesis project. Users add places they want to visit during a day trip. The "What Next?" engine recommends the optimal next destination based on closing times, priority, and proximity. Google Maps handles turn-by-turn navigation. As the user checks in to places, the map accumulates a Flighty-style trajectory of their journey.
 
 ---
 
 ## Motivation
 
-Planning a day trip is harder than it looks. Opening hours vary, walking times between spots add up, and visiting places in the wrong order can mean arriving after closing time. Existing tools (Google Maps, etc.) don't optimize for this — they route between two fixed points but don't solve the scheduling problem.
+Planning a day trip is harder than it looks. Opening hours vary, walking times between spots add up, and visiting places in the wrong order can mean arriving after closing time. Existing tools (Google Maps, etc.) don't solve the scheduling problem — they route between two fixed points but don't adapt in real time as the user moves through their day.
 
-PathFinder frames this as a **Travelling Salesman Problem with Time Windows (TSPTW)**: find the shortest-distance tour that visits all locations within their allowed time windows.
+PathFinder takes a different approach: instead of computing a single "optimal route" up front (which breaks the moment reality diverges from the plan), it gives the user a **live feasibility dashboard** and an on-demand "What Next?" recommendation. The user stays in control; the app provides guidance.
 
 ---
 
@@ -23,74 +18,42 @@ PathFinder frames this as a **Travelling Salesman Problem with Time Windows (TSP
 
 | Layer | Technology | Why |
 |---|---|---|
-| Backend | Python + FastAPI | Async I/O, auto-generated API docs, SSE streaming support |
-| Frontend | Vue 3 + Vite | Reactive UI, fast dev cycle |
+| Backend | Python + FastAPI | Async I/O, SSE streaming support, auto-generated API docs |
+| Frontend | Vue 3 + Vite | Reactive UI, fast dev cycle, Composition API |
 | Maps | Leaflet.js | Open-source, no API key needed |
-| Routing | OSRM (Open Source Routing Machine) | Free, no usage limits, real walking/driving times |
+| Routing | OSRM (self-hosted Docker) | Free, no usage limits, real walking/driving/cycling times |
 | Geocoding | Nominatim (OpenStreetMap) | Free, no API key, OSM data |
-| Opening Hours | Overpass API (OpenStreetMap) | Structured OSM tag queries |
-| Parsing | `humanized_opening_hours` library | Handles complex OSM opening_hours strings |
-| Database (v2) | SQLite via aiosqlite | Lightweight persistence, UUID-based trip URLs |
+| Opening Hours | Overpass API (primary) + Google Places (fallback) | Structured OSM data with fallback |
+| Database | SQLite via aiosqlite | Lightweight persistence, UUID-based trip URLs |
 
 ---
 
-## Algorithms and Mathematical Formulations
+## Core Algorithms
 
-### 1. Nearest Neighbor Heuristic (Greedy TSP)
+### 1. Feasibility Scoring
 
-The simplest baseline. Starting from the user's current location, always travel to the nearest unvisited place.
-
-- **Complexity:** O(N²) for N locations
-- **Quality:** Typically 10–25% worse than optimal
-- **Role:** Fast initial solution; used as a starting point for more sophisticated solvers
-
-### 2. Travelling Salesman Problem with Time Windows (TSPTW)
-
-Each location has a **time window** `[earliest, latest]` (e.g., a museum open 09:00–17:00). The goal is to find a tour that minimizes travel time while visiting each place within its window.
-
-**Time representation:** All times are stored as seconds from midnight.
-- 09:00 → 32,400 s
-- 17:00 → 61,200 s
-
-**Constraint handling — Penalty Method:**
-
-Rather than enforcing hard constraints (which can make the problem infeasible with no solution), violations are penalized:
-
-```
-total_cost = travel_time + 10,000 × violation_count
-```
-
-This allows the solver to always return *some* route — either fully feasible, or the least-bad option if perfect scheduling is impossible.
-
-### 3. Simulated Annealing (v1 metaheuristic)
-
-Used in v1 to improve routes beyond the greedy baseline. Randomly swaps pairs of locations in the tour, accepting worse solutions with a probability that decreases over time ("cooling"), to escape local optima.
-
-- **Temperature schedule:** Exponential cooling
-- **Acceptance:** Metropolis criterion — accept worse solution with probability e^(−ΔCost/T)
-
-### 4. Feasibility Scoring (v2)
-
-For each unvisited location, compute a **slack** value: how much spare time would remain after visiting this place and still reaching the trip endpoint on time.
+For each unvisited place, compute a **slack** value: how much spare time would remain after visiting this place and still reaching the trip endpoint on time.
 
 ```
 slack = trip_end_time − (arrival_time + visit_duration + travel_to_endpoint)
 slack_ratio = slack / remaining_time
 ```
 
-Each location is colored:
+Each place is colored:
 
 | Color | Meaning | Condition |
 |---|---|---|
-| Green | Comfortable visit | slack_ratio ≥ 30% and closes in > 2 hours |
-| Yellow | Feasible but tight | slack_ratio ≥ 10% or closes within 2 hours |
-| Red | High pressure | slack_ratio < 10% or closes within 30 min |
+| Green | Comfortable | slack_ratio ≥ 30% and closing not imminent |
+| Yellow | Tight | slack_ratio 10–30% or closing within 2 hours |
+| Red | High pressure | slack_ratio < 10% or closing within 30 min |
 | Gray | Impossible | slack < 0 or already closed |
-| Unknown | No hours data | Time is feasible, but no opening hours info |
+| Unknown | No hours data | Time-feasible but opening hours unknown |
 
-### 5. "What Next?" Opportunity Cost Scoring (v2)
+Trip times are always interpreted in the trip's local timezone (stored per-trip, auto-detected from browser at creation).
 
-Recommends the best next place to visit using a weighted score:
+### 2. "What Next?" Opportunity Cost Scoring
+
+Recommends the best next place using a weighted score:
 
 ```
 score = 0.40 × opportunity_cost
@@ -102,16 +65,20 @@ score = 0.40 × opportunity_cost
 - **Proximity:** Normalized travel time from current position
 - **Priority:** User-assigned importance (must=1.0, want=0.5, if_time=0.2)
 
-Returns the top 3 recommendations with plain-language reasoning.
+Returns top 3 recommendations with plain-language reasoning.
+
+### 3. Category Duration Defaults
+
+20 place categories with sensible default visit durations (museum=90min, cafe=30min, etc.), overridable per place by the user.
 
 ---
 
 ## Opening Hours Pipeline
 
-1. Query **Overpass API** for the `opening_hours` OSM tag at each location (3 mirror endpoints for reliability)
-2. Parse the OSM format string (e.g., `"Mo-Fr 09:00-17:00; Sa 10:00-15:00"`) into time windows using the `humanized_opening_hours` library
+1. Query **Overpass API** for the `opening_hours` OSM tag near each place (3 mirror endpoints for reliability)
+2. Parse the OSM format string (e.g., `"Mo-Fr 09:00-17:00; Sa 10:00-15:00"`) into time windows
 3. Handle edge cases: split periods, overnight hours, 24/7, missing data
-4. Fall back to **Google Places API** if OSM data is unavailable (v2 roadmap)
+4. Fall back to **Google Places API** if OSM data is unavailable
 
 ---
 
@@ -121,55 +88,73 @@ Returns the top 3 recommendations with plain-language reasoning.
 User Browser (Vue 3 SPA)
         │
         ▼
-FastAPI Backend
+FastAPI Backend (port 8000)
         │
-   ┌────┴────┐
-   │         │
-Nominatim   OSRM
-(geocoding) (routing)
+   ┌────┴─────────┬──────────────┐
+   │              │              │
+OSRM Docker   Overpass API   Nominatim
+(foot/car/    (opening       (geocoding)
+ bicycle)      hours)
         │
-   Overpass API
-   (opening hours)
+   Google Places API
+   (opening hours fallback)
         │
-   SQLite DB (v2)
-   (trip persistence)
+   SQLite DB
+   (trip + place + trajectory persistence)
 ```
 
-The frontend communicates with the backend via REST endpoints and **Server-Sent Events (SSE)** for real-time streaming of solver progress.
+Frontend communicates via REST + **Server-Sent Events (SSE)** for real-time feasibility updates and urgency alerts.
+
+---
+
+## Journey Flow
+
+1. User creates trip: city, arrive-by time, start location, transport mode, closed/open trip type
+2. Adds places with priority and expected duration — map shows feasibility-colored pins
+3. Taps "What Next?" — algorithm suggests best next destination based on current position
+4. Taps "Go" — Google Maps opens in new tab with directions; app waits for return
+5. User returns to app — "Did you arrive at [place]?" prompt for one-tap check-in
+6. On arrival: trajectory segment drawn on map (road-following arc, like Flighty flight arcs)
+7. Taps "Done" when finished — manually requests next recommendation when ready
+8. Repeat until all places visited:
+   - Closed trip: "Head back to your starting point"
+   - Open trip: "Head to your final destination"
+
+---
+
+## Trajectory System
+
+- Journey segments stored in `trajectory_segments` table (survives page refresh)
+- On "arrived" check-in: OSRM route geometry fetched from last position to arrived place
+- If OSRM is unavailable, the segment is **skipped** (no fake straight lines drawn)
+- Frontend draws segments as semi-transparent purple polylines (encoded polyline decoding inline)
+
+---
+
+## Database Schema
+
+```sql
+trips               -- city, coords, times, transport_mode, timezone
+places              -- name, coords, category, priority, hours, status, timestamps
+distance_cache      -- cached OSRM travel times between places
+trajectory_segments -- completed journey arcs (geometry, distance, duration)
+```
 
 ---
 
 ## Key Design Decisions
 
+**Why "What Next?" instead of a pre-computed route?**
+A single optimal route breaks the moment reality diverges from the plan. "What Next?" adapts to where the user actually is, what time it is now, and what's still reachable.
+
 **Why OSRM instead of Google Maps?**
-OSRM is open-source, self-hostable, and has no usage limits or billing — important for a thesis project that needs reproducibility and no external dependencies.
+OSRM is open-source, self-hostable, and has no usage limits or billing — important for a thesis project needing reproducibility and no external API dependencies.
 
-**Why penalty-based constraints instead of hard constraints?**
-Hard constraints can make the problem infeasible (no solution exists). The penalty approach always produces a usable result — either fully valid or "best effort with warnings" — which is more useful in practice.
+**Why skip trajectory segments when OSRM is down?**
+A straight-line arc through buildings is visually wrong and misleading. A missing segment is better than a fake one.
 
-**Why shift from v1 (solver) to v2 (feasibility dashboard)?**
-A single "optimal route" output assumes perfect information and a rigid plan. Real travel is dynamic — places get skipped, time runs short. v2 gives the user actionable real-time guidance rather than a plan that breaks the moment reality diverges from it.
+**Why SQLite?**
+Lightweight persistence for a single-user thesis project. UUID-based trip URLs provide sharable links without authentication.
 
----
-
-## Project Structure
-
-```
-PathFinder/
-├── app/
-│   ├── main.py                    # FastAPI entry point
-│   └── services/
-│       ├── nominatim.py           # Geocoding service
-│       ├── osrm.py                # Distance matrix (OSRM)
-│       ├── overpass.py            # Opening hours (OSM)
-│       └── opening_hours_utils.py # OSM string parser
-├── frontend/
-│   └── src/
-│       ├── App.vue                # Root Vue component
-│       └── components/
-├── tests/
-│   ├── test_algorithms.py         # NN + TSPTW unit tests
-│   └── test_opening_hours.py      # Opening hours parser tests
-├── STRATEGY.md                    # v2 architecture design
-└── IMPLEMENTATION_PLAN.md         # Detailed thesis defense guide
-```
+**Why monolithic Vue views?**
+Home.vue and Dashboard.vue are intentionally monolithic for thesis scope. Component decomposition would add complexity without benefit at this scale.

@@ -87,7 +87,7 @@ tests/
   ├── test_slice4.py         # SSE urgency alerts + stream tests (Slice 4/5)
   ├── test_slice6.py         # Transport mode switching tests (Slice 6)
   ├── test_slice7.py         # Edge cases: OSRM fallback, empty states, error responses (Slice 7)
-  └── test_trajectory.py    # Trajectory persistence, check-in recording, cascade delete
+  └── test_trajectory.py    # Trajectory persistence, check-in recording, cascade delete (OSRM-resilient)
 ```
 
 ## API Endpoints
@@ -116,7 +116,7 @@ GET    /api/geocode?q=...                      → Geocode address via Nominatim
 ### Check-In & Trajectory
 ```
 POST   /api/trips/{id}/checkin                 → { place_id, action: "arrived"|"done"|"skipped" }
-                                                  "arrived" records trajectory segment automatically
+                                                  "arrived" records trajectory segment (OSRM required; skipped if unavailable)
 GET    /api/trips/{id}/trajectory              → All journey segments (geometry, distance, duration)
 ```
 
@@ -143,7 +143,7 @@ GET    /health                                 → { status: "ok" }
 
 ### 2. Testing
 ```bash
-# Run all tests (65 tests)
+# Run all tests (72 tests)
 pytest tests/ -v
 
 # Run one slice
@@ -222,18 +222,29 @@ from dotenv import load_dotenv
 - **Opening hours**: Overpass API (primary) → Google Places (fallback) → unknown
 
 ### Journey Flow (Flighty-style)
-1. User creates trip (city, end time, start location, transport mode, closed/open path)
+1. User creates trip (city, arrive-by time, start location, transport mode, closed/open path)
+   - Browser auto-detects timezone via `Intl.DateTimeFormat`
+   - Frontend validates end_time > start_time before submission
+   - Start/end locations set via search or "Pick on map" button
 2. Adds places with priority and expected duration — map shows feasibility-colored pins
+   - Search bar and results clear after adding a place
+   - Place names display as short name (text before first comma) in cards
 3. Taps "What Next?" — algorithm suggests best next destination
-4. Taps "Go" — Google Maps opens in new tab with directions
-5. User navigates to destination, returns to app, taps "Arrived"
+4. Taps "Go" — Google Maps opens in new tab, What Next? card dismisses, place stored as pending arrival
+5. User navigates to destination, returns to app — sees "Did you arrive at [place]?" with one-tap confirm
+   - Can also tap "I went somewhere else" to pick from full list
 6. Trajectory segment is drawn on the map (retrospective, like Flighty flight arcs)
-7. Auto-suggests next destination after tapping "Done" at current place
-8. Repeat until all places visited — then "Head to final destination"
+   - Only recorded when OSRM is available; skipped (not drawn) when OSRM is down
+7. Taps "Done" at current place — user manually taps "What Next?" when ready
+8. Repeat until all places visited:
+   - What Next? and check-in sections auto-hide
+   - Closed trip: "Head back to your starting point" with Google Maps link
+   - Open trip: "Head to your final destination" with Google Maps link
 
 ### Trajectory System
 - Segments stored in `trajectory_segments` table (survives page refresh/tab kill)
 - On "arrived" check-in: OSRM route geometry fetched from last position → arrived place
+- If OSRM is unreachable, segment is **not** recorded (no straight-line fallback for trajectory)
 - Last position = most recent trajectory segment's destination, or trip start if first visit
 - Frontend draws segments as semi-transparent polylines (purple #6366f1)
 - Google Maps navigation URL: `maps/dir/?api=1&origin=...&destination=...&travelmode=...`
@@ -247,7 +258,7 @@ from dotenv import load_dotenv
 - `pending` → `arrived` (visiting) or `skipped`
 - `visiting` → `done` or `skipped`
 - Invalid transitions return 400
-- "arrived" action automatically records trajectory segment
+- "arrived" action records trajectory segment when OSRM is available (skipped otherwise)
 
 ### Transport Mode Switching
 - PATCH trip with new mode → invalidates distance_cache → background recompute via OSRM
@@ -295,7 +306,8 @@ DATABASE_PATH=./data/pathfinder.db
 | OSRM containers have no health checks | Startup race conditions | Manually verify OSRM with curl before testing |
 | Nominatim has no rate-limit guard | Heavy usage may trigger 429s | Cache geocode results or self-host |
 | Timezone stored per trip (default UTC) | Feasibility uses trip timezone for opening hours | Set timezone when creating trip |
-| OSRM fallback uses straight-line estimates | Less accurate when OSRM is down | Haversine + 1.4x detour factor + profile-specific speeds |
+| OSRM fallback uses straight-line estimates | Feasibility less accurate when OSRM is down | Haversine + 1.4x detour factor + profile-specific speeds |
+| Trajectory requires OSRM | No trajectory segments recorded when OSRM is down | Segments resume when OSRM comes back; missing gaps are acceptable |
 | Frontend is two monolithic views | Harder to maintain at scale | Acceptable for thesis scope |
 
 ## Debugging
