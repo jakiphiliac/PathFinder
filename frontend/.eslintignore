@@ -1,0 +1,37 @@
+# Ignore dependencies
+node_modules/
+
+# Build / bundler output
+dist/
+build/
+public/
+
+# Vite cache
+.vite/
+
+# ESLint cache file
+.eslintcache
+
+# Coverage output
+coverage/
+
+# Bundles / minified / sourcemaps
+*.bundle.js
+*.min.js
+*.map
+
+# Lockfiles (don't lint these)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment files
+.env
+.env.*.local
+
+# IDE / editor folders
+.vscode/
+.idea/
+
+# Misc generated files
+*.local

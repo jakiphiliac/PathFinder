@@ -917,8 +917,8 @@ onUnmounted(() => {
           {{ trip.city }}
           <button
             class="btn btn-small btn-copy"
-            @click="copyTripUrl"
             title="Copy trip URL"
+            @click="copyTripUrl"
           >
             Share
           </button>
@@ -957,16 +957,16 @@ onUnmounted(() => {
         {{ remainingCount }} &middot; Reachable: {{ reachableCount }}
         <button
           :class="['btn', 'btn-small', settingPosition ? 'btn-active' : '']"
-          @click="toggleSetPosition"
           title="Click this, then click anywhere on the map to set your current position for feasibility calculations"
+          @click="toggleSetPosition"
         >
           {{ settingPosition ? "Click map to pin..." : "Pin my location" }}
         </button>
         <button
           v-if="!allPlacesDone"
           :class="['btn', 'btn-small', addingByClick ? 'btn-active' : '']"
-          @click="toggleAddByClick"
           title="Click this, then click anywhere on the map to add a destination at that location"
+          @click="toggleAddByClick"
         >
           {{ addingByClick ? "Click map to place..." : "+ Add by clicking" }}
         </button>
@@ -1001,11 +1001,11 @@ onUnmounted(() => {
       <div v-if="!allPlacesDone" class="next-section">
         <button
           class="btn btn-next"
-          @click="askWhatNext"
           :disabled="nextLoading || !pendingPlaces.length"
           :title="
             pendingPlaces.length ? '' : 'Add places to enable recommendations'
           "
+          @click="askWhatNext"
         >
           {{
             nextLoading
@@ -1254,8 +1254,8 @@ onUnmounted(() => {
               <span class="duration-label">min</span>
               <button
                 class="btn btn-small btn-skip"
-                @click="handleCheckin(p.id, 'skipped')"
                 :disabled="checkinLoading"
+                @click="handleCheckin(p.id, 'skipped')"
               >
                 Skip
               </button>

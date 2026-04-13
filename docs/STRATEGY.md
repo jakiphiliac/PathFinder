@@ -244,6 +244,22 @@ Invalid transitions return HTTP 400. "arrived" triggers trajectory recording if 
 - **Frontend validation**: end_time must be after start_time; shown before API call
 - **SSE alerts**: urgency banners auto-dismiss after 30 seconds, max 5 visible
 
+### Developer tooling (frontend linting & formatting)
+
+- The frontend now includes ESLint for static linting in addition to Prettier for formatting.
+- Dev dependencies used: `eslint`, `eslint-plugin-vue`, and `eslint-config-prettier` (Prettier remains the formatter; ESLint focuses on code-quality and Vue-specific rules).
+- Useful npm scripts (in `frontend/package.json`):
+  - `npm run format` → runs Prettier (rewrites files)
+  - `npm run lint` → runs ESLint (reports issues)
+  - `npm run lint:fix` → runs ESLint with `--fix` (auto-fixes fixable problems)
+- Install command (run in the `frontend` directory):
+  - `npm install --save-dev eslint eslint-plugin-vue eslint-config-prettier`
+- Typical workflow:
+  - Format files: `npm run format`
+  - Lint and fix: `npm run lint:fix`
+  - Review remaining lint warnings: `npm run lint`
+- Recommendation: add a pre-commit hook (e.g., `husky` + `lint-staged`) to run `prettier --write` and `eslint --fix` on staged files so linting/formatting are enforced before commits. This reduces noisy diffs and ensures consistent style across the team.
+
 ---
 
 ## SSE Event Format

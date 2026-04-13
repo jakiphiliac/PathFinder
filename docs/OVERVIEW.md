@@ -28,6 +28,35 @@ PathFinder takes a different approach: instead of computing a single "optimal ro
 
 ---
 
+## Tooling & Linting
+
+This project uses a small set of formatters and linters for developer ergonomics. Recent update: ESLint has been added to the frontend to provide Vue-specific static linting; Prettier remains the frontend formatter and Ruff is used for Python.
+
+- Backend (Python)
+  - Formatter & linter: `ruff`
+  - Common commands:
+    - `ruff format` — format files in-place
+    - `ruff check app/ tests/` — report lint issues
+    - `ruff check --fix app/ tests/` — auto-fix fixable issues
+
+- Frontend (Vue / JS / CSS)
+  - Formatter: `prettier`
+  - Linter: `eslint` with `eslint-plugin-vue` and `eslint-config-prettier`
+  - Files added:
+    - `frontend/.eslintrc.cjs` — ESLint configuration
+    - `frontend/.eslintignore`
+    - `frontend/package.json` scripts: `format`, `lint`, `lint:fix`
+  - Install & use (from `frontend/`):
+    - `npm install --save-dev eslint eslint-plugin-vue eslint-config-prettier`
+    - `npm run format` — Prettier (rewrites files)
+    - `npm run lint` — ESLint (reports issues)
+    - `npm run lint:fix` — ESLint with `--fix` (auto-fix where possible)
+
+Recommendations:
+- Add a pre-commit hook (e.g. `husky` + `lint-staged`) or use `pre-commit` to run formatters and linters on staged files.
+- CI should run `ruff check`, a Python type checker (Pyright or mypy), `npm run lint`, and the test suite.
+
+---
 ## Core Algorithms
 
 ### 1. Feasibility Scoring
