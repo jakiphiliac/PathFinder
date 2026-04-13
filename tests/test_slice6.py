@@ -1,15 +1,15 @@
 """Slice 6 tests: Transport Mode Switching."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 import httpx
+import pytest
 from httpx import ASGITransport
 
-from app.main import app
-from app.db import init_db
 from app.config import settings
+from app.db import init_db
+from app.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +91,8 @@ async def test_patch_transport_mode_invalidates_cache(client):
         cursor = await db.execute(
             "SELECT COUNT(*) FROM distance_cache WHERE trip_id = ?", (trip_id,)
         )
-        count = (await cursor.fetchone())[0]
+        _row = await cursor.fetchone()
+        count = _row[0] if _row is not None else 0
         assert count > 0, "Cache should be populated after adding places"
 
     # Switch mode — cache should be cleared synchronously
@@ -107,7 +108,8 @@ async def test_patch_transport_mode_invalidates_cache(client):
         cursor = await db.execute(
             "SELECT COUNT(*) FROM distance_cache WHERE trip_id = ?", (trip_id,)
         )
-        count = (await cursor.fetchone())[0]
+        _row = await cursor.fetchone()
+        count = _row[0] if _row is not None else 0
         assert count == 0, "Cache should be empty after mode switch"
 
 
@@ -196,7 +198,8 @@ async def test_patch_without_mode_change_keeps_cache(client):
         cursor = await db.execute(
             "SELECT COUNT(*) FROM distance_cache WHERE trip_id = ?", (trip_id,)
         )
-        count_before = (await cursor.fetchone())[0]
+        _row = await cursor.fetchone()
+        count_before = _row[0] if _row is not None else 0
 
     # PATCH only end_time — should NOT clear cache
     resp = await client.patch(f"/api/trips/{trip_id}", json={"end_time": "20:00"})
@@ -206,7 +209,8 @@ async def test_patch_without_mode_change_keeps_cache(client):
         cursor = await db.execute(
             "SELECT COUNT(*) FROM distance_cache WHERE trip_id = ?", (trip_id,)
         )
-        count_after = (await cursor.fetchone())[0]
+        _row = await cursor.fetchone()
+        count_after = _row[0] if _row is not None else 0
         assert count_after == count_before, "Cache should not change for non-mode PATCH"
 
 

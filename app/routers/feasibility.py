@@ -34,10 +34,10 @@ class FeasibilityContext:
     current_time: datetime
     trip_end_dt: datetime
     trip_date: date
-    trip_timezone: str | None = None
     endpoint_idx: int
     place_names: dict[int, str] = field(default_factory=dict)
     place_priorities: dict[int, str] = field(default_factory=dict)
+    trip_timezone: str | None = None
 
 
 _SPEED_MPS: dict[str, float] = {
