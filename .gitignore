@@ -9,3 +9,9 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+
+# OSRM preprocessed data — large binary files, generated locally
+osrm-data/
+
+# SQLite database — runtime data, not source code
+data/

@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "format": "prettier --write frontend/src"
+  },
+  "devDependencies": {
+    "prettier": "^3.8.1"
+  }
+}

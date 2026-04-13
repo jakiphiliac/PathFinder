@@ -1,0 +1,12 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "standard",
+  "reportGeneralTypeIssues": true,
+  "reportOptionalSubscript": true,
+  "reportOptionalMemberAccess": true,
+  "reportUnusedVariable": true,
+  "reportUnusedImport": true,
+  "reportConstantRedefinition": true
+}

@@ -1,0 +1,60 @@
+# PathFinder v2 — Self-hosted OSRM routing engines for Hungary
+#
+# Setup (one-time):
+#   1. Download Hungary OSM extract:
+#      wget https://download.geofabrik.de/europe/hungary-latest.osm.pbf -P osrm-data/
+#
+#   2. Pre-process for foot profile:
+#      docker run -t -v $(pwd)/osrm-data:/data osrm/osrm-backend \
+#        osrm-extract -p /opt/profiles/foot.lua /data/hungary-latest.osm.pbf
+#      docker run -t -v $(pwd)/osrm-data:/data osrm/osrm-backend \
+#        osrm-partition /data/hungary-latest.osrm
+#      docker run -t -v $(pwd)/osrm-data:/data osrm/osrm-backend \
+#        osrm-customize /data/hungary-latest.osrm
+#      mv osrm-data/hungary-latest.osrm* osrm-data/foot/
+#
+#   3. Pre-process for car profile (repeat with car.lua):
+#      docker run -t -v $(pwd)/osrm-data:/data osrm/osrm-backend \
+#        osrm-extract -p /opt/profiles/car.lua /data/hungary-latest.osm.pbf
+#      ... (same partition + customize steps)
+#      mv osrm-data/hungary-latest.osrm* osrm-data/car/
+#
+#   4. Pre-process for bicycle profile (repeat with bicycle.lua):
+#      ... same process, move to osrm-data/bicycle/
+#
+# Then run:
+#   docker compose up -d
+#
+# Verify:
+#   curl "http://localhost:5000/table/v1/foot/19.04,47.50;19.05,47.51?annotations=duration"
+
+services:
+  osrm-foot:
+    image: osrm/osrm-backend:v5.25.0
+    container_name: pathfinder-osrm-foot
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./osrm-data/foot:/data
+    command: osrm-routed --algorithm mld /data/hungary-latest.osrm
+    restart: unless-stopped
+
+  osrm-car:
+    image: osrm/osrm-backend:v5.25.0
+    container_name: pathfinder-osrm-car
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./osrm-data/car:/data
+    command: osrm-routed --algorithm mld /data/hungary-latest.osrm
+    restart: unless-stopped
+
+  osrm-bicycle:
+    image: osrm/osrm-backend:v5.25.0
+    container_name: pathfinder-osrm-bicycle
+    ports:
+      - "5002:5000"
+    volumes:
+      - ./osrm-data/bicycle:/data
+    command: osrm-routed --algorithm mld /data/hungary-latest.osrm
+    restart: unless-stopped
