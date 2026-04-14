@@ -36,8 +36,9 @@ async def create_trip(
     date = body.date or now_dt.strftime("%Y-%m-%d")
     tz = body.timezone or "UTC"
 
-    # Validate end_time > start_time on the same day
-    if body.end_time <= start_time:
+    # Validate end_time > start_time on the same day only when the user provided start_time.
+    # If start_time was omitted we default it to now; in that case we don't enforce the check.
+    if body.start_time is not None and body.end_time <= start_time:
         raise HTTPException(
             status_code=400,
             detail=f"End time ({body.end_time}) must be after start time ({start_time})",

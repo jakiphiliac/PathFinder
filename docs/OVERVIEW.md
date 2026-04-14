@@ -147,6 +147,7 @@ Frontend communicates via REST + **Server-Sent Events (SSE)** for real-time feas
 8. Repeat until all places visited:
    - Closed trip: "Head back to your starting point"
    - Open trip: "Head to your final destination"
+9. Trip is archived — user can view a summary page with stats, map, and place list
 
 ---
 
@@ -162,7 +163,7 @@ Frontend communicates via REST + **Server-Sent Events (SSE)** for real-time feas
 ## Database Schema
 
 ```sql
-trips               -- city, coords, times, transport_mode, timezone
+trips               -- city, coords, times, transport_mode, timezone, status (active/archived), completed_at
 places              -- name, coords, category, priority, hours, status, timestamps
 distance_cache      -- cached OSRM travel times between places
 trajectory_segments -- completed journey arcs (geometry, distance, duration)
@@ -185,4 +186,4 @@ A straight-line arc through buildings is visually wrong and misleading. A missin
 Lightweight persistence for a single-user thesis project. UUID-based trip URLs provide sharable links without authentication.
 
 **Why monolithic Vue views?**
-Home.vue and Dashboard.vue are intentionally monolithic for thesis scope. Component decomposition would add complexity without benefit at this scale.
+Home.vue, Dashboard.vue, and Summary.vue are intentionally monolithic for thesis scope. Component decomposition would add complexity without benefit at this scale.

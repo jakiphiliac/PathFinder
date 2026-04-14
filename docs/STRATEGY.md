@@ -61,7 +61,7 @@
 | 13 | API design | REST for mutations + SSE for live feasibility updates | SSE is simpler than WebSockets for one-way push |
 | 14 | Transport mode | User picks per trip, can switch mid-trip | Invalidates distance cache, recomputes |
 | 15 | Timezone | Stored per trip, auto-detected from browser | Opening hours interpreted in trip's local time |
-| 16 | Frontend structure | Two monolithic views (Home.vue, Dashboard.vue) | Acceptable for thesis scope |
+| 16 | Frontend structure | Three monolithic views (Home.vue, Dashboard.vue, Summary.vue) | Acceptable for thesis scope |
 | 17 | OSRM hosting | Self-hosted Docker (Hungary extract) | No API costs, reproducible |
 | 18 | Testing | pytest unit + integration tests, OSRM-resilient | 72 tests covering all slices |
 
@@ -82,6 +82,8 @@ CREATE TABLE trips (
     date TEXT NOT NULL,               -- "2026-04-15" (defaults to today)
     transport_mode TEXT NOT NULL DEFAULT 'foot',  -- foot/car/bicycle
     timezone TEXT NOT NULL DEFAULT 'UTC',         -- e.g. "Europe/Budapest"
+    status TEXT NOT NULL DEFAULT 'active',       -- active/archived
+    completed_at TEXT,                           -- set when archived
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -136,6 +138,7 @@ POST   /api/trips                              → Create trip (validates end_ti
 GET    /api/trips/{id}                         → Get trip with all places
 PATCH  /api/trips/{id}                         → Update transport_mode / times / timezone
 DELETE /api/trips/{id}                         → Delete trip + cascade all child records
+POST   /api/trips/{id}/archive                 → Archive trip (sets status=archived, completed_at)
 ```
 
 ### Place Management
@@ -241,6 +244,7 @@ Invalid transitions return HTTP 400. "arrived" triggers trajectory recording if 
 - **What Next? + check-in sections** hidden when all places are done
 - **Closed trip completion**: "Head back to your starting point" banner + Google Maps link
 - **Open trip completion**: "Head to your final destination" banner + Google Maps link
+- **Trip summary** (`/trip/:id/summary`): post-trip view with stats (visited/skipped/distance/time), trajectory map, and place list
 - **Frontend validation**: end_time must be after start_time; shown before API call
 - **SSE alerts**: urgency banners auto-dismiss after 30 seconds, max 5 visible
 

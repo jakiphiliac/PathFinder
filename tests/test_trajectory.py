@@ -63,7 +63,9 @@ async def _osrm_available() -> bool:
     """Check if OSRM is reachable (tests may run with or without it)."""
     try:
         async with httpx.AsyncClient(timeout=2.0) as c:
-            r = await c.get("http://localhost:5000/health")
+            r = await c.get(
+                "http://localhost:5000/table/v1/foot/19.04,47.50;19.05,47.51"
+            )
             return r.status_code == 200
     except Exception:
         return False

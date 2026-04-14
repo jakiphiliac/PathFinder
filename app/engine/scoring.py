@@ -128,6 +128,7 @@ def score_next_actions(
                 current_time=time_after_other,
                 trip_end_time=trip_end_time,
                 trip_date=trip_date,
+                trip_timezone=trip_timezone,
             )
             if not _is_feasible(place, simulated_feas):
                 cost += 1

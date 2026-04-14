@@ -41,7 +41,7 @@ cd frontend && npm run dev
 | **Nominatim** | Geocoding | API calls |
 
 ### Database Schema
-- **trips**: User trip records (city, coords, times, transport mode, timezone)
+- **trips**: User trip records (city, coords, times, transport mode, timezone, status, completed_at)
 - **places**: Location data (coordinates, name, category, priority, opening hours, status, timestamps)
 - **distance_cache**: Cached OSRM results (trip_id, from/to place, duration_seconds)
 - **trajectory_segments**: Completed journey legs (from/to coords, OSRM geometry, distance, duration)
@@ -76,12 +76,13 @@ frontend/
   ├── src/
   │   ├── main.js            # Vue 3 app entry point
   │   ├── App.vue            # Root component (router-view)
-  │   ├── router.js          # Vue Router: / and /trip/:id
-  │   ├── api.js             # All API calls + SSE connection + trajectory fetch
+  │   ├── router.js          # Vue Router: /, /trip/:id, /trip/:id/summary
+  │   ├── api.js             # All API calls + SSE connection + trajectory fetch + archive
   │   ├── style.css          # Global styles (dark/light theme, buttons)
   │   └── views/
   │       ├── Home.vue       # Landing page: trip creation form + map
-  │       └── Dashboard.vue  # Trip dashboard: map, feasibility, trajectory, check-in, What Next?, Google Maps navigation
+  │       ├── Dashboard.vue  # Trip dashboard: map, feasibility, trajectory, check-in, What Next?, Google Maps navigation
+  │       └── Summary.vue    # Post-trip summary: stats, trajectory map, place list
   ├── public/
   │   └── favicon.svg        # App favicon
   ├── index.html             # HTML entry point
@@ -95,6 +96,7 @@ tests/
   ├── test_slice4.py         # SSE urgency alerts + stream tests (Slice 4/5)
   ├── test_slice6.py         # Transport mode switching tests (Slice 6)
   ├── test_slice7.py         # Edge cases: OSRM fallback, empty states, error responses (Slice 7)
+  ├── test_scoring_timezone.py # Timezone propagation in scoring (scoring module)
   └── test_trajectory.py    # Trajectory persistence, check-in recording, cascade delete (OSRM-resilient)
 ```
 
@@ -106,6 +108,7 @@ POST   /api/trips                              → Create trip, returns { id, ur
 GET    /api/trips/{id}                         → Get trip with all places
 PATCH  /api/trips/{id}                         → Update settings (transport_mode, times, timezone)
 DELETE /api/trips/{id}                         → Delete trip + cascade
+POST   /api/trips/{id}/archive                 → Archive trip (sets status=archived, completed_at)
 ```
 
 ### Place Management
@@ -151,7 +154,7 @@ GET    /health                                 → { status: "ok" }
 
 ### 2. Testing
 ```bash
-# Run all tests (72 tests)
+# Run all tests (73 tests)
 pytest tests/ -v
 
 # Run one slice
@@ -206,7 +209,7 @@ git push
 
 ### Frontend
 - **Vue 3 Composition API** with `<script setup>`
-- **No component decomposition** — Home.vue and Dashboard.vue are monolithic views
+- **No component decomposition** — Home.vue, Dashboard.vue, and Summary.vue are monolithic views
 - **Leaflet** for maps (imported via npm, not CDN)
 - **Formatter**: Prettier
 
@@ -316,7 +319,7 @@ DATABASE_PATH=./data/pathfinder.db
 | Timezone stored per trip (default UTC) | Feasibility uses trip timezone for opening hours | Set timezone when creating trip |
 | OSRM fallback uses straight-line estimates | Feasibility less accurate when OSRM is down | Haversine + 1.4x detour factor + profile-specific speeds |
 | Trajectory requires OSRM | No trajectory segments recorded when OSRM is down | Segments resume when OSRM comes back; missing gaps are acceptable |
-| Frontend is two monolithic views | Harder to maintain at scale | Acceptable for thesis scope |
+| Frontend is three monolithic views | Harder to maintain at scale | Acceptable for thesis scope |
 
 ## Debugging
 

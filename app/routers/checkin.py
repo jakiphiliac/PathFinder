@@ -5,12 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 import aiosqlite
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.config import settings
 from app.db import get_db
-from app.http_client import client_instance
 from app.models import CheckinRequest, CheckinResponse, TrajectorySegment
 from app.services.osrm import get_route_geometry
 
@@ -144,31 +141,7 @@ async def _record_trajectory(
 
         to_lat, to_lon = place["lat"], place["lon"]
 
-        # Check OSRM is reachable using /nearest — /health returns 400 on this version.
-        try:
-            osrm_base = {
-                "foot": settings.osrm_foot_url,
-                "car": settings.osrm_car_url,
-                "bicycle": settings.osrm_bicycle_url,
-            }.get(transport_mode, settings.osrm_foot_url)
-            probe_url = f"{osrm_base}/nearest/v1/{transport_mode}/19.0402,47.4979"
-            client = client_instance()
-            if client is not None:
-                resp = await client.get(probe_url, timeout=1.0)
-            else:
-                async with httpx.AsyncClient(timeout=1.0) as tmp:
-                    resp = await tmp.get(probe_url)
-            if resp.status_code != 200:
-                logger.warning(
-                    "OSRM probe failed (%s) — skipping trajectory segment",
-                    probe_url,
-                )
-                return None
-        except Exception:
-            logger.warning("OSRM probe error — skipping trajectory segment")
-            return None
-
-        # Fetch OSRM route geometry
+        # Fetch OSRM route geometry (handles OSRM failures gracefully)
         legs = await get_route_geometry(
             [[from_lon, from_lat], [to_lon, to_lat]], transport_mode
         )
