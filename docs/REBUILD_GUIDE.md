@@ -279,7 +279,7 @@ async with get_or_create_http_client() as client:
 **Goal**: Create trips, add/remove/update places. No algorithms yet.
 **Files to create**: `app/models.py`, `app/routers/trips.py`, `app/routers/places.py`
 **Lines**: ~645
-**Tests**: `test_slice1.py` — create/get/update/delete trips + places (~180 lines, ~15 tests)
+**Tests**: `test_trip_place_crud.py` — create/get/update/delete trips + places (~180 lines, ~15 tests)
 
 ### What to build
 
@@ -348,7 +348,7 @@ The trips POST endpoint generates a UUID with `uuid.uuid4().hex[:36]` (or just `
 **Goal**: Calculate whether each place is reachable given time constraints. Color-code: green/yellow/red/gray/unknown.
 **Files to create**: `app/services/osrm.py`, `app/engine/category_defaults.py`, `app/engine/feasibility.py`, `app/routers/feasibility.py`
 **Lines**: ~770
-**Tests**: `test_slice2.py` — feasibility colors, category defaults, endpoint integration (~270 lines, ~15 tests)
+**Tests**: `test_feasibility_engine.py` — feasibility colors, category defaults, endpoint integration (~270 lines, ~15 tests)
 
 ### What to build
 
@@ -447,7 +447,7 @@ In `places.py`, the background task `_cache_distances_background()` should now c
 **Goal**: Recommend the best next destination using opportunity-cost scoring.
 **Files to create**: `app/engine/scoring.py`, `app/routers/next_action.py`
 **Lines**: ~254
-**Tests**: `test_slice3.py` — scoring weights, filtering, opportunity cost (~12 tests)
+**Tests**: `test_scoring_recommendations.py` — scoring weights, filtering, opportunity cost (~12 tests)
 
 ### What to build
 
@@ -484,7 +484,7 @@ Each recommendation includes: place_id, place_name, score, opportunity_cost, tra
 **Goal**: Push live feasibility updates and urgency alerts to the frontend.
 **Files to create**: `app/routers/stream.py`
 **Lines**: ~172
-**Tests**: `test_slice4.py` — stream events, color degradation alerts (~8 tests)
+**Tests**: `test_sse_alerts.py` — stream events, color degradation alerts (~8 tests)
 
 ### What to build
 
@@ -515,7 +515,7 @@ Alert format: `{place_id, place_name, message, severity: "warning"|"critical"}`
 **Goal**: Search for POIs, resolve their opening hours from OSM/Google.
 **Files to create**: `app/routers/search.py`, `app/services/overpass.py`, `app/services/hours.py`, `app/services/google_places.py`
 **Lines**: ~688
-**Tests**: part of `test_slice7.py` for edge cases
+**Tests**: part of `test_edge_cases.py` for edge cases
 
 ### What to build
 
@@ -584,7 +584,7 @@ In `places.py`, the `_resolve_hours_background()` task now calls `resolve_openin
 **Goal**: State machine for visiting places. Record journey legs on the map.
 **Files to create**: `app/routers/checkin.py`, `app/routers/trajectory.py`
 **Lines**: ~229
-**Tests**: `test_trajectory.py` (~10 tests), `test_slice6.py` (~5 tests)
+**Tests**: `test_trajectory.py` (~10 tests), `test_transport_modes.py` (~5 tests)
 
 ### What to build
 
@@ -843,7 +843,7 @@ Shared utilities used by both Dashboard and Summary:
 ## Slice 11 — Edge Cases, Transport Modes, Polish
 
 **Goal**: Handle all edge cases, finalize transport mode switching, clean up.
-**Tests**: `test_slice6.py` (transport), `test_slice7.py` (edge cases), `test_scoring_timezone.py`
+**Tests**: `test_transport_modes.py` (transport), `test_edge_cases.py` (edge cases), `test_scoring_timezone.py`
 **Lines**: tests + fixes
 
 ### What to test and handle
@@ -961,10 +961,10 @@ source venv/bin/activate
 pytest tests/ -v
 
 # Run a single test file
-pytest tests/test_slice2.py -v
+pytest tests/test_feasibility_engine.py -v
 
 # Run one specific test
-pytest tests/test_slice2.py::test_feasibility_color_green -v
+pytest tests/test_feasibility_engine.py::test_feasibility_color_green -v
 
 # Run with output (print statements, logging)
 pytest tests/ -v -s
@@ -975,17 +975,17 @@ pytest tests/ -x
 
 ### Test structure
 
-| File | Slice | What it tests | Count |
-|------|-------|---------------|-------|
-| `test_infrastructure.py` | 0 | DB creation, schema, column types, indexes | 9 |
-| `test_slice1.py` | 1 | Trip/place CRUD, 404s, validation | 9 |
-| `test_slice2.py` | 2 | Feasibility colors, Haversine fallback, category defaults | 11 |
-| `test_slice3.py` | 3 | Scoring weights, opportunity cost, top-3 ordering | 10 |
-| `test_slice4.py` | 4 | SSE urgency alerts, color degradation | 9 |
-| `test_slice6.py` | 6 | Transport mode switching, cache invalidation | 5 |
-| `test_slice7.py` | 7+ | Edge cases: empty trips, OSRM down, invalid transitions | 12 |
-| `test_trajectory.py` | 6 | Trajectory recording, last-position logic, cascade delete | 7 |
-| `test_scoring_timezone.py` | 11 | Timezone propagation through scoring engine | 1 |
+| File | What it tests | Count |
+|------|---------------|-------|
+| `test_infrastructure.py` | DB creation, schema, column types, indexes | 9 |
+| `test_trip_place_crud.py` | Trip/place CRUD, 404s, validation | 9 |
+| `test_feasibility_engine.py` | Feasibility colors, Haversine fallback, category defaults | 11 |
+| `test_scoring_recommendations.py` | Scoring weights, opportunity cost, top-3 ordering | 10 |
+| `test_sse_alerts.py` | SSE urgency alerts, color degradation | 9 |
+| `test_transport_modes.py` | Transport mode switching, cache invalidation | 5 |
+| `test_edge_cases.py` | Edge cases: empty trips, OSRM down, invalid transitions | 12 |
+| `test_trajectory.py` | Trajectory recording, last-position logic, cascade delete | 7 |
+| `test_scoring_timezone.py` | Timezone propagation through scoring engine | 1 |
 
 **Total: 73 tests**
 
